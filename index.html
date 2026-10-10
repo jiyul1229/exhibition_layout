@@ -1,0 +1,2290 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>가상 미술 전시관</title>
+<style>
+  /* ===== 기본 레이아웃: 화면 전체를 3D 캔버스가 차지 ===== */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22;
+    font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif; color: #1d2430; }
+  canvas { display: block; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  [hidden] { display: none !important; }   /* hidden 속성이 display 설정에 덮어쓰이지 않게 */
+
+  /* ===== 미술관 작품 설명판 느낌의 패널 ===== */
+  .panel { position: fixed; background: #f6f6f3; border: 1px solid #cfd0cc; border-radius: 4px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.35); padding: 14px 16px; }
+
+  /* ===== 버튼 A(3D) · B(2D) · C(크기 조절)는 모두 같은 모양 ===== */
+  .mbtn { padding: 9px 14px; min-width: 64px; border: 1px solid #111; border-radius: 3px; background: #fff; color: #111;
+    font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+  .mbtn:hover { background: #ececec; }
+  .mbtn.on { box-shadow: inset 0 0 0 2px #111, 0 4px 14px rgba(0,0,0,.35); }   /* 켜진(선택된) 상태 */
+  .mbtn:focus-visible, .up:focus-within, .tabs button:focus-visible { outline: 2px solid #888; outline-offset: 2px; }
+
+  /* ===== 좌측 상단: 버튼 C + 벽별 크기 조절 패널 ===== */
+  #topLeft { position: fixed; top: 16px; left: 16px; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 8px; }           /* 버튼 C, D를 나란히 */
+  #topLeft .panel { width: 230px; box-sizing: border-box; }
+  #sizePanel, #uploads, #savePanel { position: static; margin-top: 8px; }
+  #topLeft #sizePanel { width: min(256px, calc(100vw - 32px)); }       /* 상하연동 칸이 들어가도록 조금 넓게 */
+  #savePanel { display: flex; flex-direction: column; gap: 8px; }
+  #savePanel[hidden] { display: none; }
+  #savePanel .mbtn { width: 100%; box-shadow: none; }
+  #savePanel .mbtn:disabled { opacity: .6; cursor: wait; }
+  .lnk { display: inline-flex; align-items: center; gap: 4px; margin: 0 6px; font-size: 12px; white-space: nowrap; cursor: pointer; user-select: none; }
+  .lnk input { margin: 0; width: 14px; height: 14px; accent-color: #111; cursor: pointer; }
+  #numW { width: 56px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tabs button { flex: 1; padding: 6px 0; border: 1px solid #111; border-radius: 3px; background: #fff; color: #111;
+    font-size: 13px; cursor: pointer; }
+  .tabs button.on { font-weight: 700; box-shadow: inset 0 0 0 2px #111; }
+  .row { margin-bottom: 12px; font-size: 13px; }
+  .row .lab { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .num { font-weight: 700; color: #111; }                    /* 숫자 + 단위(m) */
+  .num input { width: 74px; padding: 1px 2px; border: 0; border-bottom: 1px solid #111; background: transparent;
+    font: inherit; color: #111; text-align: right; }            /* 클릭해서 직접 입력 가능 */
+  .num input:focus { outline: 2px solid #888; background: #fff; }
+  input[type=range] { width: 100%; accent-color: #111; }
+  .hint { margin: 0; font-size: 12px; color: #626870; line-height: 1.5; }
+  #help { margin-top: 10px; color: #f1f1ee; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+
+  /* ===== 좌측 하단: 버튼 A / B, B를 누르면 위로 동·서·남·북 메뉴가 열림 ===== */
+  #views { position: fixed; left: 16px; bottom: 16px; display: flex; gap: 8px; }
+  .rel { position: relative; }
+  #dirMenu, #angleMenu { position: absolute; bottom: calc(100% + 8px); left: 0; display: flex; flex-direction: column;
+    gap: 6px; padding: 8px; }
+  #dirMenu .mbtn, #angleMenu .mbtn { width: 96px; font-size: 14px; box-shadow: none; }
+  #dirMenu .mbtn.on, #angleMenu .mbtn.on { box-shadow: inset 0 0 0 2px #111; }
+  #btn3D, #btn2D, #btnHome { box-sizing: border-box; width: 64px; height: 40px; padding: 0; line-height: 1; white-space: nowrap; }   /* 3D·2D·원위치 버튼을 가로·세로 모두 똑같은 크기로 (한글/영문 글꼴 높이 차이도 없앰) */
+  #views { align-items: flex-end; }
+
+  /* ===== 버튼 D: 벽면별 이미지 선택 패널 (input은 숨기고 label을 버튼처럼 사용) ===== */
+  #uploads { display: flex; flex-direction: column; gap: 8px; }
+  .up { display: flex; flex-direction: column; padding: 8px 10px; border: 1px solid #111; border-radius: 3px;
+    background: #fff; color: #111; cursor: pointer; font-size: 12px; }
+  .up:hover { background: #ececec; }
+  .up input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .up b { font-size: 13px; }
+  .up span { color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #uploads .tabs { margin-bottom: 0; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .wrow { display: flex; gap: 6px; }                         /* 벽지 한 줄: 파일 선택 */
+  .wrow .up { flex: 1; min-width: 0; }
+  .fbtn + .wrow { margin-top: 4px; padding-top: 10px; border-top: 1px solid #c9c9c9; }   /* 스타일 버튼과 '내 이미지' 줄 사이 구분선 */
+  /* ===== 우측 상단: 오브젝트 버튼 + 메뉴 + 선택한 액자 패널 ===== */
+  #topRight { position: fixed; top: 16px; right: 16px; width: 220px; display: flex; flex-direction: column;
+    align-items: flex-end; gap: 8px; }
+  #topRight .panel { position: static; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; }
+  #topRight .panel .mbtn { width: 100%; box-shadow: none; }
+  /* 오브젝트 메뉴: 버튼 5개만 보이고 나머지는 스크롤/드래그로 내려서 선택 (높이는 JS가 5개 기준으로 계산) */
+  #topRight #objMenu { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; cursor: grab; touch-action: pan-y; }
+  #objMenu .mbtn { flex: none; }
+  #rotBox { display: flex; flex-direction: column; gap: 8px; }
+  .rotbtns { display: flex; gap: 4px; flex: 1; }
+  #topRight .panel .rotbtns .mbtn { min-width: 0; padding: 6px 0; font-size: 13px; flex: 1; }
+  #objMenu.dragging { cursor: grabbing; user-select: none; }
+  .up.sel { box-shadow: inset 0 0 0 2px #111; }                 /* 선택한 액자의 이미지 버튼 표시 */
+  .num input { -moz-appearance: textfield; appearance: textfield; }   /* 위아래 화살표를 없애 'cm'가 숫자 바로 뒤에 붙어 보이게 */
+  .num input::-webkit-outer-spin-button, .num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  #objName { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #111; border-radius: 3px;
+    background: #fff; color: #111; font-size: 13px; }
+  .num { white-space: nowrap; }
+  .orow { display: flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }   /* 오브젝트 폼 한 줄: 글자 + 입력칸 (+ cm) */
+  .orow label { width: 64px; flex: none; }
+  .orow #objName { width: auto; flex: 1; min-width: 0; }
+  .orow .num { display: flex; align-items: center; gap: 4px; }
+  .tabs { flex-wrap: wrap; }                                     /* 탭이 3개라 좁으면 줄바꿈 */
+  .tabs button { flex: 1 1 auto; padding: 6px 6px; font-size: 12px; white-space: nowrap; }
+  #floorList, #ceilList { display: flex; flex-direction: column; gap: 6px; }
+  .fbtn { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid #111; border-radius: 3px;
+    background: #fff; color: #111; cursor: pointer; font-size: 13px; text-align: left; }
+  .fbtn:hover { background: #ececec; }
+  .fbtn.on { box-shadow: inset 0 0 0 2px #111; font-weight: 700; }
+  .fbtn i { width: 18px; height: 18px; border: 1px solid #777; border-radius: 2px; flex: none; }   /* 재질 색 견본 */
+  /* ===== 우측 하단: 나침반 (황동 테두리 + 짙은 남색 판. 글자는 항상 바로 서 있음) ===== */
+  #compass { position: fixed; right: 16px; bottom: 16px; width: 100px; height: 100px; pointer-events: none; user-select: none;
+    filter: drop-shadow(0 3px 7px rgba(0,0,0,.5)); }
+  #compass svg { width: 100%; height: 100%; display: block; }
+  #compass text { font-family: Georgia, 'Times New Roman', 'Noto Serif', serif; font-weight: 700; font-size: 10px;
+    fill: #e9dfc4; text-anchor: middle; dominant-baseline: central; }
+  #compass text.n { fill: #e0584a; }
+  #topRight .btnrow { display: flex; gap: 8px; }                  /* [수정][삭제] / [생성][취소] 나란히 */
+  #topRight .btnrow .mbtn { min-width: 0; padding-left: 4px; padding-right: 4px; }
+  @media (max-width: 560px) { #topLeft .panel { width: 200px; } }
+</style>
+</head>
+<body>
+
+<!-- 좌측 상단: 버튼 C(크기 조절) → 누르면 벽별 가로/세로 슬라이더 패널이 열림 -->
+<div id="topLeft">
+  <div class="btnrow">
+    <button class="mbtn" id="sizeBtn">크기 조절</button>   <!-- 버튼 C -->
+    <button class="mbtn" id="imgBtn">이미지 선택</button>   <!-- 버튼 D -->
+    <button class="mbtn" id="saveBtn">세이브 / 로드</button>   <!-- 버튼 E: 전시관 저장 · 불러오기 -->
+  </div>
+  <div class="panel" id="sizePanel" hidden>
+    <div class="tabs" id="wallTabs"></div>
+    <div class="row">
+      <div class="lab"><label for="sliderW">가로 길이</label>
+        <label class="lnk" id="linkLab" title="맞은편 벽의 가로 길이를 함께 바꿔요"><input type="checkbox" id="linkChk"><span>상하연동</span></label>
+        <span class="num"><input type="number" id="numW" min="1" max="10000" step="1" aria-label="가로 길이(cm)"> cm</span></div>
+      <input type="range" id="sliderW" min="1" max="10000" step="1">
+    </div>
+    <div class="row">
+      <div class="lab"><label for="sliderH">세로 길이</label>
+        <span class="num"><input type="number" id="numH" min="1" max="4000" step="1" aria-label="세로 길이(cm)"> cm</span></div>
+      <input type="range" id="sliderH" min="1" max="4000" step="1">
+    </div>
+  </div>
+  <!-- 버튼 D 패널: [액자이미지] [벽이미지] 선택 → 각각 동·서·남·북 버튼 4개(JS에서 생성) -->
+  <div class="panel" id="uploads" hidden>
+    <div class="tabs"><button id="tabWall">벽</button><button id="tabFrame" hidden>액자</button><button id="tabFloor">바닥</button><button id="tabCeil">천장</button></div>
+    <div class="list" id="frameList" hidden></div>
+    <div id="floorList" hidden></div>
+    <div id="ceilList" hidden></div>
+    <div class="list" id="wallList" hidden>
+    </div>
+  </div>
+  <div class="panel" id="savePanel" hidden>
+    <button class="mbtn" id="saveDo">세이브 (파일로 저장)</button>
+    <button class="mbtn" id="loadDo">로드 (파일 불러오기)</button>
+    <input type="file" id="loadFile" accept=".json,application/json" hidden>
+    <p class="hint" id="saveMsg" hidden></p>
+  </div>
+  <p class="hint" id="help">드래그: 둘러보기 / 휠: 확대·축소 / 방향키(WASD): 이동</p>
+</div>
+
+<!-- 우측 상단: 오브젝트 버튼 → 목록에서 오브젝트 선택 → 크기 입력 → [생성]을 눌러야 만들어짐 -->
+<div id="topRight">
+  <button class="mbtn" id="objBtn">오브젝트</button>
+  <div class="panel" id="objMenu" hidden></div>
+  <div class="panel" id="objForm" hidden>
+    <p class="hint" id="objFormTitle" style="margin:0"></p>
+    <div class="orow"><label for="objName">이름</label><input type="text" id="objName" maxlength="20" autocomplete="off"></div>
+    <div class="orow"><label for="objW" id="lblW">가로 길이</label>
+      <span class="num"><input type="number" id="objW" min="5" max="1000" step="1" value="120"><span>cm</span></span></div>
+    <div class="orow"><label for="objH" id="lblH">세로 길이</label>
+      <span class="num"><input type="number" id="objH" min="5" max="400" step="1" value="80"><span>cm</span></span></div>
+    <div id="rotBox" hidden>
+      <div class="orow"><label for="objRot">회전</label>
+        <input type="range" id="objRot" min="0" max="359" step="1" value="0" style="flex:1;min-width:0">
+        <span class="num"><input type="number" id="objRotNum" min="0" max="359" step="1" value="0" style="width:40px"><span>°</span></span></div>
+      <div class="orow"><label>방향</label>
+        <div class="rotbtns"><button class="mbtn" data-deg="180">북</button><button class="mbtn" data-deg="90">동</button><button class="mbtn" data-deg="0">남</button><button class="mbtn" data-deg="270">서</button></div></div>
+    </div>
+    <div class="btnrow"><button class="mbtn" id="objCreate">생성</button><button class="mbtn" id="objCancel">취소</button></div>
+  </div>
+  <div class="panel" id="framePanel" hidden>
+    <p class="hint" style="margin:0"><b id="frameName"></b></p>
+    <div class="btnrow"><button class="mbtn" id="objEdit">수정</button><button class="mbtn" id="frameDel">삭제</button></div>
+  </div>
+</div>
+
+<!-- 우측 하단: 나침반 (북=붉은 N. 지금 바라보는 방향이 위쪽의 작은 삼각형 쪽) -->
+<div id="compass" aria-label="나침반">
+  <svg viewBox="0 0 100 100">
+    <defs>
+      <linearGradient id="cGold" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#f6e3a6"/><stop offset=".45" stop-color="#b8892f"/><stop offset="1" stop-color="#6e4f17"/>
+      </linearGradient>
+      <radialGradient id="cDial" cx=".5" cy=".38" r=".75">
+        <stop offset="0" stop-color="#2d3445"/><stop offset="1" stop-color="#0f1219"/>
+      </radialGradient>
+    </defs>
+    <circle cx="50" cy="50" r="48.5" fill="url(#cGold)"/>
+    <circle cx="50" cy="50" r="45.5" fill="none" stroke="#5a3f10" stroke-width=".7"/>
+    <circle cx="50" cy="50" r="44.5" fill="url(#cDial)"/>
+    <circle cx="50" cy="50" r="38" fill="none" stroke="#b8892f" stroke-width=".4" opacity=".7"/>
+    <g id="cDisc">
+      <polygon points="62,38 55,50 62,62 50,55 38,62 45,50 38,38 50,45" fill="#8f7a45"/>
+      <polygon points="50,26 55.5,44.5 74,50 55.5,55.5 50,74 44.5,55.5 26,50 44.5,44.5" fill="#e9dfc4" stroke="#8a6a24" stroke-width=".4"/>
+      <polygon points="50,26 55.5,44.5 44.5,44.5" fill="#b3342a"/>
+      <text class="n" x="50" y="19">N</text><text x="81" y="50">E</text><text x="50" y="81">S</text><text x="19" y="50">W</text>
+      <circle cx="50" cy="50" r="3" fill="url(#cGold)" stroke="#4a3410" stroke-width=".4"/>
+    </g>
+    <polygon points="50,3.2 46.8,9 53.2,9" fill="#f6e3a6" stroke="#6e4f17" stroke-width=".3"/>
+    <ellipse cx="38" cy="26" rx="20" ry="9" fill="#fff" opacity=".07" transform="rotate(-28 38 26)"/>
+  </svg>
+</div>
+
+<!-- 좌측 하단: 버튼 A(3D 쿼터뷰), 버튼 B(2D 벽면 보기 - 방향 선택 메뉴는 JS에서 생성) -->
+<div id="views">
+  <div class="rel">
+    <button class="mbtn" id="btn3D">3D</button>
+    <div class="panel" id="angleMenu" hidden></div>   <!-- 3D 각도 4개(JS에서 생성) -->
+  </div>
+  <div class="rel">
+    <button class="mbtn" id="btn2D">2D</button>
+    <div class="panel" id="dirMenu" hidden></div>
+  </div>
+  <button class="mbtn" id="btnHome" title="처음(걸어 다니던) 시점으로 돌아가요" hidden>원위치</button>   <!-- 버튼 C: 처음 시점으로 (3D/2D 화면에서만 보임) -->
+</div>
+
+<!-- Three.js CDN (모듈이 아닌 일반 스크립트 버전이라 index.html을 더블클릭해도 동작) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* =====================================================================
+ * ★ 작품 이미지 설정 (여기만 바꾸면 기본 이미지가 교체됩니다)
+ * 순서: [0] 북쪽 벽, [1] 동쪽 벽, [2] 남쪽 벽, [3] 서쪽 벽
+ * Lorem Picsum의 id를 고정해서 매번 같은 사진이 나옵니다. (가로x세로 비율이 달라도 액자가 맞춰집니다)
+ * ===================================================================== */
+const artworkImages = [
+  'https://picsum.photos/id/1015/1200/800',   // 북: 가로형
+  'https://picsum.photos/id/1018/900/1200',   // 동: 세로형
+  'https://picsum.photos/id/1039/1200/900',   // 남
+  'https://picsum.photos/id/1043/1000/1000'   // 서: 정사각형
+];
+
+/* ---------- 기본 상수 ---------- */
+const WALLS = [                                  // 벽 정보 (이름, 회전각)
+  { name: '북쪽 벽', rotY: 0 },                   // 안쪽(+z)을 바라봄
+  { name: '동쪽 벽', rotY: -Math.PI / 2 },        // 안쪽(-x)을 바라봄
+  { name: '남쪽 벽', rotY: Math.PI },             // 안쪽(-z)을 바라봄
+  { name: '서쪽 벽', rotY: Math.PI / 2 }          // 안쪽(+x)을 바라봄
+];
+const ROOM_H = 4.5;       // 벽 높이 기본값
+const EYE_H = 1.7;        // 눈높이(중앙 시점 카메라 높이)
+const FRAME_Y = 2.2;      // 액자 중심 높이(벽이 낮으면 자동으로 낮춰짐)
+const MAX_W = 3.2, MAX_H = 2.4;   // 액자 안 이미지가 들어갈 수 있는 최대 크기(m)
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* ★ 벽별 크기 데이터 (순서: 북·동·남·서) — w: 가로 길이, h: 세로 길이(높이)
+ * 벽마다 따로 저장되므로 한 벽을 바꿔도 다른 벽은 그대로 유지됩니다. */
+const dims = [{ w: 4.43, h: ROOM_H }, { w: 12, h: ROOM_H }, { w: 4.43, h: ROOM_H }, { w: 12, h: ROOM_H }];
+try {                      // 이전에 저장한 크기가 있으면 불러오기 (새로고침해도 유지)
+  const saved = JSON.parse(localStorage.getItem('galleryDims2'));
+  if (Array.isArray(saved) && saved.length === 4) saved.forEach((d, i) => {
+    if (d && isFinite(d.w) && isFinite(d.h)) { dims[i].w = clamp(d.w, 0.01, 100); dims[i].h = clamp(d.h, 0.01, 40); }
+  });
+} catch (e) {}
+dims.forEach(d => d.h = dims[0].h);   // 세로(높이)는 4면 연동: 저장값이 달라도 하나로 통일
+
+let wallTreeVer = 0;      // 벽 그룹 안의 물체가 늘거나 줄거나 옮겨질 때마다 +1 (투명화 대상 목록 캐시 갱신용)
+let roomW = 16, roomD = 12, roomH = ROOM_H;  // 벽 크기로부터 계산되는 방 전체 크기
+let mode = 'center';      // 시점 모드: 'center'(중앙) | 'top'(3D 위에서 보기) | 'wall'(2D 한 벽만 보기)
+let topSide = 2;         // 3D 모드에서 투명하게 숨길(= 카메라가 있는) 벽 번호 (0북 1동 2남 3서)
+let wallView = 0;         // 2D 모드에서 보고 있는 벽 번호
+let userFov = 60;         // 휠로 조절한 중앙 시점 화각
+const orbit = { yaw: 0, pitch: 0.8, zoom: 1 };   // 3D 시점: 방 중심을 도는 카메라 (yaw 좌우 회전 / pitch 높이 각도 / zoom 거리 배율)
+const walk = { x: 0, z: 0 };  const keys = new Set();   // 중앙 시점에서 걸어 다닌 위치 / 지금 눌려 있는 키
+const MOVE_BOOST = 1.7;                          // 방향키 이동 속도 배율 (걷기 · 3D 돌기/확대 · 2D 이동/확대에 모두 적용)
+const WALK_SPEED = 3 * MOVE_BOOST;               // 걷는 속도 (m/초)
+const view2D = { zoom: 1, px: 0, py: 0, wpp: 0.01 };   // 2D 벽면 보기: 확대 배율 / 벽을 따라 옮긴 거리 / 위아래로 옮긴 거리 / 화면 1px당 벽 위 길이(m)
+
+/* ---------- 렌더러 / 씬 / 카메라 ---------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;     // 사진 색감을 정확하게 표시
+document.body.prepend(renderer.domElement);
+const canvas = renderer.domElement;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b1d22);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100);   // far는 animate()에서 방 크기에 맞춰 자동 조절
+
+/* ---------- 조명 ---------- */
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));            // 전체 기본 밝기
+const ceilingLight = new THREE.PointLight(0xffffff, 0.35);   // 방 가운데 천장 조명 (바닥 음영용)
+scene.add(ceilingLight);
+
+/* ---------- 바닥 / 천장 ---------- */
+// 바닥: 이미지 선택 → '바닥' 탭에서 재질을 고릅니다. 모든 재질은 캔버스로 즉석에서 그려 사용 (외부 파일 불필요)
+// 텍스처 한 장(FN 픽셀)이 가로세로로 반복되므로, 가장자리가 자연스럽게 이어지도록 그립니다.
+const TILE_M = 0.6, TILE_N = 4;                  // 포세린 타일 한 장의 크기(m) / 텍스처 한 장에 담는 타일 수(가로·세로 4장씩)
+const FN = 1024;
+const fc = document.createElement('canvas'); fc.width = fc.height = FN;
+const fx = fc.getContext('2d');
+const rnd = Math.random;
+const gridLines = (n, color, w) => {             // 줄눈: n칸 격자선 (가장자리 선은 양쪽 끝에 그려서 이어 붙여도 같은 굵기)
+  fx.strokeStyle = color;  fx.lineWidth = w;
+  for (let i = 0; i <= n; i++) {
+    fx.beginPath(); fx.moveTo(i * FN / n, 0); fx.lineTo(i * FN / n, FN); fx.stroke();
+    fx.beginPath(); fx.moveTo(0, i * FN / n); fx.lineTo(FN, i * FN / n); fx.stroke();
+  }
+};
+const blob = (x, y, r, rgb, a) => {              // 부드러운 얼룩 (9방향으로 그려 가장자리가 이어지게)
+  for (const dx of [-FN, 0, FN]) for (const dy of [-FN, 0, FN]) {
+    const g = fx.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+    g.addColorStop(0, `rgba(${rgb},${a})`);  g.addColorStop(1, `rgba(${rgb},0)`);
+    fx.fillStyle = g;  fx.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
+  }
+};
+const speckle = (n, rgbA, rgbB, maxA, big) => {   // 잔 얼룩(질감)
+  for (let i = 0; i < n; i++) {
+    fx.fillStyle = `rgba(${rnd() < 0.5 ? rgbA : rgbB},${rnd() * maxA})`;
+    fx.fillRect(rnd() * FN, rnd() * FN, 1 + rnd() * big, 1 + rnd() * big);
+  }
+};
+
+function drawTile() {                            // 1) 포세린 타일: 타일마다 밝기가 조금씩 다름 + 줄눈
+  const tp = FN / TILE_N;
+  for (let r = 0; r < TILE_N; r++) for (let c = 0; c < TILE_N; c++) {
+    fx.fillStyle = `hsl(40, 6%, ${74 + rnd() * 6}%)`;
+    fx.fillRect(c * tp, r * tp, tp, tp);
+  }
+  speckle(TILE_N * TILE_N * 260, '90,85,75', '90,85,75', 0.07, 6);
+  gridLines(TILE_N, '#85827b', 5);
+}
+function drawWood(hue, sat, light) {             // 2·3) 원목 마루: 판자 16줄, 줄마다 이음새 위치가 다름
+  const rows = 16, rh = FN / rows, pw = FN / 2;
+  for (let r = 0; r < rows; r++) {
+    const off = rnd() * FN;
+    for (let k = 0; k < 2; k++) {
+      const x = (off + k * pw) % FN, y = r * rh, col = `hsl(${hue + rnd() * 6 - 3}, ${sat}%, ${light + rnd() * 8 - 4}%)`;
+      const plank = ox => {
+        fx.fillStyle = col;  fx.fillRect(ox, y, pw, rh);
+        for (let g = 0; g < 10; g++) {           // 나뭇결
+          const gy = y + rnd() * rh;
+          fx.strokeStyle = `rgba(60,35,15,${0.05 + rnd() * 0.08})`;  fx.lineWidth = 1 + rnd() * 1.5;
+          fx.beginPath(); fx.moveTo(ox, gy); fx.lineTo(ox + pw, gy + (rnd() - 0.5) * 6); fx.stroke();
+        }
+        fx.strokeStyle = 'rgba(30,18,8,0.55)';  fx.lineWidth = 2;  fx.strokeRect(ox + 1, y + 1, pw - 2, rh - 2);   // 판자 사이 틈
+      };
+      plank(x);  if (x + pw > FN) plank(x - FN);
+    }
+  }
+}
+function drawConcrete() {                        // 4) 폴리싱 콘크리트: 은은한 얼룩 + 신축줄눈
+  fx.fillStyle = 'hsl(210, 4%, 60%)';  fx.fillRect(0, 0, FN, FN);
+  for (let i = 0; i < 45; i++) blob(rnd() * FN, rnd() * FN, 80 + rnd() * 160, rnd() < 0.5 ? '255,255,255' : '40,40,45', 0.06 + rnd() * 0.07);
+  speckle(5000, '255,255,255', '30,30,35', 0.09, 2);
+  gridLines(2, 'rgba(40,40,45,0.45)', 3);
+}
+function drawMarble() {                          // 5) 흰 대리석: 구름무늬 + 회색 결
+  fx.fillStyle = '#ece9e4';  fx.fillRect(0, 0, FN, FN);
+  for (let i = 0; i < 40; i++) blob(rnd() * FN, rnd() * FN, 100 + rnd() * 200, rnd() < 0.5 ? '255,255,255' : '150,150,160', 0.08 + rnd() * 0.1);
+  for (let v = 0; v < 7; v++) {
+    let x = rnd() * FN, y = rnd() * FN, a = rnd() * 6.28;
+    const pts = Array.from({ length: 40 }, () => { a += (rnd() - 0.5) * 0.9; x += Math.cos(a) * 30; y += Math.sin(a) * 30; return [x, y]; });
+    const lw = 1 + rnd() * 2, al = 0.18 + rnd() * 0.2;
+    for (const dx of [-FN, 0, FN]) for (const dy of [-FN, 0, FN]) {
+      fx.strokeStyle = `rgba(95,95,110,${al})`;  fx.lineWidth = lw;
+      fx.beginPath(); pts.forEach(([px, py], k) => k ? fx.lineTo(px + dx, py + dy) : fx.moveTo(px + dx, py + dy)); fx.stroke();
+    }
+  }
+}
+function drawChecker() {                         // 6) 흑백 체크 대리석: 미술관의 고전적인 바닥
+  const n = 4, tp = FN / n;
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    fx.fillStyle = (r + c) % 2 ? `hsl(220, 6%, ${14 + rnd() * 5}%)` : `hsl(40, 12%, ${90 + rnd() * 4}%)`;
+    fx.fillRect(c * tp, r * tp, tp, tp);
+  }
+  for (let i = 0; i < 30; i++) blob(rnd() * FN, rnd() * FN, 60 + rnd() * 120, rnd() < 0.5 ? '255,255,255' : '120,120,130', 0.06);
+  gridLines(n, 'rgba(0,0,0,0.35)', 3);
+}
+
+// 재질 목록: name 버튼 이름 / swatch 색 견본 / size 텍스처 한 장의 실제 크기(m) / rough 거칠기(작을수록 반짝) / metal / draw 그리는 함수
+const FLOORS = [
+  { name: '포세린 타일',     swatch: '#bfbcb5', size: TILE_M * TILE_N, rough: 0.28, metal: 0.05, draw: drawTile },
+  { name: '밝은 원목 마루',  swatch: '#c9985a', size: 2.4, rough: 0.55, metal: 0,    draw: () => drawWood(32, 45, 58) },
+  { name: '짙은 원목 마루',  swatch: '#5a3a24', size: 2.4, rough: 0.5,  metal: 0,    draw: () => drawWood(22, 40, 28) },
+  { name: '폴리싱 콘크리트', swatch: '#9a9da2', size: 2.4, rough: 0.35, metal: 0.1,  draw: drawConcrete },
+  { name: '흰 대리석',       swatch: '#ece9e4', size: 3.0, rough: 0.12, metal: 0.05, draw: drawMarble },
+  { name: '흑백 체크 대리석', swatch: '#2a2a2e', size: 2.4, rough: 0.15, metal: 0.05, draw: drawChecker }
+];
+
+const floorTex = new THREE.CanvasTexture(fc);
+floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+floorTex.encoding = THREE.sRGBEncoding;
+floorTex.anisotropy = renderer.capabilities.getMaxAnisotropy();   // 멀리 있는 바닥 무늬도 선명하게
+const floorMat = new THREE.MeshStandardMaterial({ map: floorTex });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), floorMat);
+floor.rotation.x = -Math.PI / 2;                 // 눕혀서 바닥으로 사용
+scene.add(floor);
+
+let floorSize = TILE_M * TILE_N, curFloor = 0;
+function setFloor(i) {                           // 바닥 재질 바꾸기: 텍스처를 다시 그리고 광택·무늬 크기 적용
+  const f = FLOORS[curFloor = i];
+  fx.clearRect(0, 0, FN, FN);  f.draw();
+  floorTex.needsUpdate = true;
+  floorMat.roughness = f.rough;  floorMat.metalness = f.metal;
+  floorSize = f.size;  floorTex.repeat.set(roomW / floorSize, roomD / floorSize);
+  FLOORS.forEach((o, k) => o.btn && o.btn.classList.toggle('on', k === i));
+}
+setFloor(0);
+
+/* ---------- 천장: 6가지 종류 (이미지 선택 → '천장' 탭에서 고름) ----------
+ * 기본은 고풍스러운 격자 천장: 월넛 보(들보) + 아이보리 석고 패널(금빛 테두리·에메랄드 모서리) + 가운데 장미 장식 + 황동 샹들리에.
+ * 벽의 에메랄드·월넛·금빛과 어울리게 만들었고, 모두 캔버스/도형으로 즉석 생성합니다.
+ * 중앙 시점에서는 보이고, 3D 버튼으로 시점이 바뀌면 서서히 사라져요 (animate()에서 처리). */
+const ceiling = new THREE.Group();                   // 천장 전체 묶음: 높이는 updateRoom → layoutCeiling이 맞춤
+scene.add(ceiling);
+const ceilMats = [];                                 // 투명도를 한꺼번에 바꾸기 위한 재질 목록
+let ceilA = 1;                                       // 천장의 현재 투명도 (1: 보임 / 0: 사라짐)
+const cMat = (opt, basic) => { const m = basic ? new THREE.MeshBasicMaterial(opt) : new THREE.MeshStandardMaterial(opt); ceilMats.push(m); return m; };
+const ceilTex = cv => { const t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; };
+
+function makeCofferCanvas() {                        // 패널 한 칸: 아이보리 석고 + 금빛 이중 테두리 + 에메랄드 모서리 장식
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(S / 2, S / 2, 20, S / 2, S / 2, S * 0.78);
+  gr.addColorStop(0, '#f3ead4');  gr.addColorStop(1, '#d9ccab');
+  g.fillStyle = gr;  g.fillRect(0, 0, S, S);
+  g.fillStyle = 'rgba(40,25,10,.20)';   g.fillRect(0, 0, S, 10);  g.fillRect(0, 0, 10, S);          // 오목하게 들어간 느낌의 그늘
+  g.fillStyle = 'rgba(255,255,255,.28)'; g.fillRect(0, S - 6, S, 6);  g.fillRect(S - 6, 0, 6, S);
+  g.strokeStyle = '#b8892f';  g.lineWidth = 4;  g.strokeRect(24, 24, S - 48, S - 48);              // 금빛 이중 테두리
+  g.strokeStyle = '#d9bb6e';  g.lineWidth = 2;  g.strokeRect(33, 33, S - 66, S - 66);
+  [[33, 33], [S - 33, 33], [33, S - 33], [S - 33, S - 33]].forEach(([x, y]) => {                   // 모서리 에메랄드 마름모
+    g.fillStyle = '#2f4d40';  g.strokeStyle = '#b8892f';  g.lineWidth = 2;
+    g.beginPath();  g.moveTo(x, y - 13);  g.lineTo(x + 13, y);  g.lineTo(x, y + 13);  g.lineTo(x - 13, y);  g.closePath();  g.fill();  g.stroke();
+  });
+  g.translate(S / 2, S / 2);                                                                       // 가운데 작은 네잎 장식
+  g.fillStyle = 'rgba(184,137,47,.55)';
+  for (let k = 0; k < 4; k++) { g.rotate(Math.PI / 2);  g.beginPath();  g.ellipse(0, -22, 9, 20, 0, 0, Math.PI * 2);  g.fill(); }
+  g.fillStyle = '#2f4d40';  g.beginPath();  g.arc(0, 0, 8, 0, Math.PI * 2);  g.fill();
+  return c;
+}
+function makeRosetteCanvas() {                       // 가운데 장미 장식(메달리온): 겹겹의 꽃잎 + 금빛 고리
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(S / 2, S / 2, 10, S / 2, S / 2, S / 2);
+  gr.addColorStop(0, '#f6eed9');  gr.addColorStop(1, '#e0d3b0');
+  g.fillStyle = gr;  g.fillRect(0, 0, S, S);
+  g.translate(S / 2, S / 2);
+  g.strokeStyle = '#b8892f';  g.lineWidth = 6;  g.beginPath();  g.arc(0, 0, 120, 0, Math.PI * 2);  g.stroke();
+  g.lineWidth = 2.5;  g.beginPath();  g.arc(0, 0, 108, 0, Math.PI * 2);  g.stroke();
+  const ring = (n, r, rx, ry, fill) => {
+    for (let k = 0; k < n; k++) {
+      g.save();  g.rotate(k * Math.PI * 2 / n);  g.translate(0, -r);
+      g.fillStyle = fill;  g.strokeStyle = '#8a6a24';  g.lineWidth = 1.5;
+      g.beginPath();  g.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);  g.fill();  g.stroke();
+      g.restore();
+    }
+  };
+  ring(16, 78, 14, 28, '#dcc78f');                   // 바깥 꽃잎 16장
+  ring(8, 44, 13, 26, '#2f4d40');                    // 안쪽 에메랄드 꽃잎 8장
+  g.fillStyle = '#c99a3a';  g.strokeStyle = '#6e4f17';  g.lineWidth = 2;
+  g.beginPath();  g.arc(0, 0, 17, 0, Math.PI * 2);  g.fill();  g.stroke();
+  return c;
+}
+
+const rosetteTex = ceilTex(makeRosetteCanvas());
+const ceilBase = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial());   // 재질은 setCeiling()이 종류에 맞게 끼움
+ceilBase.rotation.x = Math.PI / 2;                   // 아래를 바라보게 (FrontSide라 위에서 보면 안 보임)
+ceiling.add(ceilBase);
+const medal = new THREE.Mesh(new THREE.CircleGeometry(1, 48), cMat({ map: rosetteTex, roughness: 0.7 }));
+medal.rotation.x = Math.PI / 2;  ceiling.add(medal);
+
+const beamMat = cMat({ color: 0x4b3121, roughness: 0.55 }), trimMat = cMat({ color: 0xc99a3a, roughness: 0.3, metalness: 0.7 });
+const unitBox = new THREE.BoxGeometry(1, 1, 1);
+const ceilBeams = [];                                // 보 + 금빛 선 한 쌍씩 (방 크기에 맞춰 개수를 늘리고 줄임)
+
+const brass = cMat({ color: 0xb8892f, roughness: 0.3, metalness: 0.8 });                          // 샹들리에 (크기 1 기준으로 만들고 방 높이에 맞춰 줄임)
+const chandelier = new THREE.Group();  ceiling.add(chandelier);
+const chAdd = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); chandelier.add(m); return m; };
+chAdd(new THREE.CylinderGeometry(0.012, 0.012, 0.9, 8), brass, 0, -0.45, 0);                      // 사슬
+chAdd(new THREE.SphereGeometry(0.09, 16, 12), brass, 0, -0.93, 0);                                // 가운데 구
+chAdd(new THREE.TorusGeometry(0.5, 0.018, 8, 40), brass, 0, -1.05, 0).rotation.x = Math.PI / 2;   // 둥근 고리
+chAdd(new THREE.SphereGeometry(0.05, 12, 10), brass, 0, -1.22, 0);                                // 아래 추
+for (let k = 0; k < 6; k++) {
+  const a = k * Math.PI / 3, cx = Math.cos(a), cz = Math.sin(a);
+  chAdd(new THREE.BoxGeometry(0.5, 0.014, 0.014), brass, cx * 0.25, -1.0, cz * 0.25).rotation.y = -a;   // 가운데에서 고리로 뻗는 살
+  chAdd(new THREE.CylinderGeometry(0.025, 0.025, 0.14, 10), cMat({ color: 0xf3ecd8, roughness: 0.6 }), cx * 0.5, -0.96, cz * 0.5);   // 초
+  chAdd(new THREE.SphereGeometry(0.032, 10, 8), cMat({ color: 0xffe2a0 }, true), cx * 0.5, -0.86, cz * 0.5);                   // 불꽃(스스로 빛남)
+}
+
+/* ----- 종류별 패널 무늬 그리기 (모두 이음새 없이 반복되도록 가장자리 처리) ----- */
+function wrapBlob(g, S, x, y, r, rgb, a) {           // 가장자리에 걸치면 반대편에도 그려서 이어 붙여도 티가 안 나는 얼룩
+  for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {
+    const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+    gr.addColorStop(0, `rgba(${rgb},${a})`);  gr.addColorStop(1, `rgba(${rgb},0)`);
+    g.fillStyle = gr;  g.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
+  }
+}
+function drawPlaster() {                             // 흰 석고: 아주 은은한 얼룩과 잔 결
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f3efe4';  g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 18; i++) wrapBlob(g, S, Math.random() * S, Math.random() * S, 40 + Math.random() * 80, Math.random() < 0.5 ? '255,255,255' : '150,130,100', 0.08);
+  for (let i = 0; i < 1500; i++) { g.fillStyle = `rgba(120,105,80,${Math.random() * 0.07})`;  g.fillRect(Math.random() * S, Math.random() * S, 1 + Math.random(), 1 + Math.random()); }
+  return c;
+}
+function drawWoodCeil() {                            // 원목 널판 천장: 가로 판자 8줄 + 나뭇결
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d'), n = 8, ph = S / n;
+  for (let r = 0; r < n; r++) {
+    g.fillStyle = `hsl(${26 + Math.random() * 6}, ${38 + Math.random() * 8}%, ${27 + Math.random() * 7}%)`;  g.fillRect(0, r * ph, S, ph);
+    for (let k = 0; k < 7; k++) {
+      const y = r * ph + Math.random() * ph;
+      g.strokeStyle = `rgba(25,12,4,${0.08 + Math.random() * 0.12})`;  g.lineWidth = 0.8 + Math.random() * 1.6;
+      g.beginPath();  g.moveTo(0, y);  g.bezierCurveTo(S * 0.3, y + (Math.random() - 0.5) * 5, S * 0.7, y + (Math.random() - 0.5) * 5, S, y);  g.stroke();
+    }
+    g.fillStyle = 'rgba(10,5,2,.65)';  g.fillRect(0, r * ph + ph - 2, S, 2);   // 판자 사이 틈
+  }
+  return c;
+}
+function drawStars() {                               // 별빛 남색: 깊은 밤하늘 + 은은한 성운 + 별
+  const S = 512, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#0b1733';  g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 10; i++) wrapBlob(g, S, Math.random() * S, Math.random() * S, 90 + Math.random() * 120, Math.random() < 0.6 ? '45,80,150' : '90,60,140', 0.16);
+  for (let i = 0; i < 260; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 0.5 + Math.random() * Math.random() * 1.8;
+    g.fillStyle = Math.random() < 0.25 ? `rgba(255,222,150,${0.6 + Math.random() * 0.4})` : `rgba(255,255,255,${0.5 + Math.random() * 0.5})`;
+    g.beginPath();  g.arc(x, y, r, 0, Math.PI * 2);  g.fill();
+    if (r > 1.6) { g.fillRect(x - r * 3, y - 0.4, r * 6, 0.8);  g.fillRect(x - 0.4, y - r * 3, 0.8, r * 6); }   // 큰 별은 반짝임 십자
+  }
+  return c;
+}
+function drawSky() {                                 // 유리 채광창: 맑은 하늘 + 구름
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#86c0ee';  g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 14; i++) wrapBlob(g, S, Math.random() * S, Math.random() * S, 40 + Math.random() * 70, '255,255,255', 0.4);
+  for (let i = 0; i < 6; i++) wrapBlob(g, S, Math.random() * S, Math.random() * S, 70 + Math.random() * 60, '120,170,225', 0.2);
+  return c;
+}
+
+/* ★ 천장 종류 목록 — 한 줄(객체)만 추가하면 '천장' 탭에 버튼이 생겨요.
+ * name 버튼 이름 / swatch 색 견본 / draw 무늬 그리는 함수 / tile 무늬 한 장의 실제 크기(m) / cell 무늬 한 장이 격자 한 칸(고풍 격자 전용)
+ * grid 보 배치: 'both' 가로세로 격자 · 'cross' 한 방향 · 'edge' 가장자리 테두리(몰딩)만 · 'none' 없음 / step 보 간격(m)
+ * beam 보 색 / trim 보 아래 금빛 선 색(없으면 null) / medal 가운데 장미 장식 / chandelier 샹들리에 / basic 조명 영향 없이 스스로 밝음 */
+const CEILINGS = [
+  { name: '고풍 격자 천장',   swatch: '#e8dcc0', draw: makeCofferCanvas, cell: true, grid: 'both',  step: 2,   beam: 0x4b3121, trim: 0xc99a3a, medal: true,  chandelier: true },
+  { name: '흰 석고 천장',     swatch: '#f4f0e6', draw: drawPlaster,      tile: 3,     grid: 'edge',  step: 2,   beam: 0xe9e3d3, trim: 0xc99a3a, medal: true,  chandelier: true },
+  { name: '원목 보 천장',     swatch: '#7a5233', draw: drawWoodCeil,     tile: 2.4,   grid: 'cross', step: 2.6, beam: 0x3a2314, trim: null,     medal: false, chandelier: false },
+  { name: '에메랄드 다마스크', swatch: '#2f4d40', draw: makeDamaskCanvas, tile: 1.6,   grid: 'both',  step: 3.2, beam: 0x4b3121, trim: 0xc99a3a, medal: true,  chandelier: true },
+  { name: '별빛 남색 천장',   swatch: '#0b1733', draw: drawStars,        tile: 7,     grid: 'edge',  step: 2,   beam: 0x6e4f17, trim: 0xc99a3a, medal: false, chandelier: false, basic: true },
+  { name: '유리 채광창',      swatch: '#86c0ee', draw: drawSky,          tile: 8,     grid: 'both',  step: 2.2, beam: 0x1f2326, trim: null,     medal: false, chandelier: false, basic: true }
+];
+let curCeil = 0;
+function ceilStyle(i) {                              // 고른 종류의 텍스처·재질을 처음 쓸 때 한 번만 만들어 둠
+  const c = CEILINGS[i];
+  if (!c.mat) {
+    c.tex = ceilTex(c.draw());
+    c.mat = c.basic ? cMat({ map: c.tex }, true) : cMat({ map: c.tex, roughness: 0.9 });
+    c.mat.transparent = ceilA < 1;  c.mat.opacity = ceilA;   // 숨겨진 상태에서 만들어도 투명도가 맞도록
+  }
+  return c;
+}
+
+const oddCount = (len, step) => { const n = Math.max(1, Math.round(len / step)); return n % 2 ? n : n + 1; };   // 칸 개수는 홀수 → 가운데 칸에 장식이 놓임
+const lines = (len, n) => Array.from({ length: n + 1 }, (_, i) => -len / 2 + i * len / n);
+function layoutCeiling(W, D, H) {                    // 방 크기·천장 종류가 바뀔 때마다 호출: 높이·보 배치·장식 크기를 다시 맞춤
+  const c = ceilStyle(curCeil), s = clamp(H / 4.5, 0.05, 1), cols = oddCount(W, c.step), rows = oddCount(D, c.step);
+  ceiling.position.y = H;
+  ceilBase.material = c.mat;
+  ceilBase.scale.set(W, D, 1);
+  if (c.cell) c.tex.repeat.set(cols, rows);  else c.tex.repeat.set(W / c.tile, D / c.tile);   // 격자 칸마다 한 장 / 일정한 크기로 반복
+  let zs = [], xs = [];                              // 보가 놓일 위치들 (zs: 가로 방향 보, xs: 세로 방향 보)
+  if (c.grid === 'both') { zs = lines(D, rows);  xs = lines(W, cols); }
+  else if (c.grid === 'cross') zs = lines(D, rows);
+  else if (c.grid === 'edge') { zs = [-D / 2, D / 2];  xs = [-W / 2, W / 2]; }
+  const fat = c.grid === 'edge' ? 1.5 : 1;           // 테두리 몰딩은 조금 더 두툼하게
+  const bw = 0.16 * s * fat, drop = 0.14 * s * fat, tw = 0.05 * s, td = 0.012 * s, need = zs.length + xs.length;
+  beamMat.color.setHex(c.beam);  if (c.trim) trimMat.color.setHex(c.trim);
+  while (ceilBeams.length < need) {
+    const beam = new THREE.Mesh(unitBox, beamMat), trim = new THREE.Mesh(unitBox, trimMat);
+    ceiling.add(beam, trim);  ceilBeams.push({ beam, trim });
+  }
+  while (ceilBeams.length > need) { const q = ceilBeams.pop();  ceiling.remove(q.beam, q.trim); }
+  let k = 0;
+  zs.forEach(z0 => {                                 // 가로(X) 방향 보
+    const z = clamp(z0, -D / 2 + bw / 2, D / 2 - bw / 2), q = ceilBeams[k++];
+    q.beam.scale.set(W, drop, bw);  q.beam.position.set(0, -drop / 2, z);
+    q.trim.scale.set(W, td, tw);    q.trim.position.set(0, -drop - td / 2, z);  q.trim.visible = !!c.trim;
+  });
+  xs.forEach(x0 => {                                 // 세로(Z) 방향 보
+    const x = clamp(x0, -W / 2 + bw / 2, W / 2 - bw / 2), q = ceilBeams[k++];
+    q.beam.scale.set(bw, drop, D);  q.beam.position.set(x, -drop / 2, 0);
+    q.trim.scale.set(tw, td, D);    q.trim.position.set(x, -drop - td / 2 - 0.0005, 0);  q.trim.visible = !!c.trim;
+  });
+  const rad = c.grid === 'both' ? Math.min(W / cols, D / rows) * 0.36 : clamp(Math.min(W, D) * 0.09, 0.2, 1.1);   // 가운데 장미 장식
+  medal.scale.set(rad, rad, 1);  medal.position.y = -0.015 * s;
+  medal.visible = c.medal;  chandelier.visible = c.chandelier;
+  chandelier.scale.setScalar(s);
+}
+function setCeiling(i) {                             // 천장 종류 바꾸기: 버튼을 누르면 바로 적용
+  curCeil = i;
+  layoutCeiling(roomW, roomD, roomH);
+  CEILINGS.forEach((o, k) => o.btn && o.btn.classList.toggle('on', k === i));
+}
+layoutCeiling(roomW, roomD, roomH);                  // 처음 한 번 배치 (정확한 방 크기는 updateRoom이 다시 맞춤)
+
+
+/* ---------- 이미지 로딩 유틸 ---------- */
+const loader = new THREE.TextureLoader();
+loader.setCrossOrigin('anonymous');              // 외부 이미지를 WebGL 텍스처로 쓰기 위해 필요
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+// 로딩 중/실패 시 보여줄 안내 텍스처 (캔버스에 글자를 그림)
+function placeholderTexture(text) {
+  const c = document.createElement('canvas'); c.width = 600; c.height = 400;
+  const g = c.getContext('2d');
+  g.fillStyle = '#4a4e57'; g.fillRect(0, 0, 600, 400);
+  g.fillStyle = '#fff'; g.font = '28px sans-serif'; g.textAlign = 'center';
+  g.fillText(text, 300, 210);
+  const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; return t;
+}
+
+/* ---------- 기본 벽 장식 (벽 이미지를 넣기 전의 고풍스러운 실내 미술관 벽) ----------
+ * 윗벽: 에메랄드 그린 다마스크 무늬 / 아랫벽: 월넛 목재 패널(웨인스코팅) / 몰딩: 바닥 걸레받이 · 의자 레일 · 천장 크라운 + 금빛 선
+ * 모두 캔버스와 도형으로 즉석 생성하므로 외부 파일이 필요 없어요. 벽 이미지를 넣으면 이 장식은 숨겨집니다. */
+function makeDamaskCanvas(bg = '#2f4d40', leaf = 'rgba(168,196,170,0.20)', gold = 'rgba(212,180,110,0.38)', dot = 'rgba(212,180,110,0.28)') {                        // 가로세로로 이어 붙여도 이음새가 보이지 않는 다마스크 무늬
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = bg;  g.fillRect(0, 0, S, S);
+  const motif = (cx, cy, sc) => {
+    for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {      // 가장자리에 걸친 무늬는 반대편에도 그려 이어 붙이기
+      g.save();  g.translate(cx + dx, cy + dy);  g.scale(sc, sc);
+      g.fillStyle = leaf;
+      g.beginPath();  g.moveTo(0, -56);  g.bezierCurveTo(34, -34, 34, 18, 0, 56);  g.bezierCurveTo(-34, 18, -34, -34, 0, -56);  g.fill();   // 큰 잎
+      [-1, 1].forEach(a => { g.beginPath();  g.ellipse(a * 26, 6, 10, 26, a * 0.6, 0, Math.PI * 2);  g.fill(); });                         // 양옆 꽃잎
+      g.fillStyle = gold;
+      g.beginPath();  g.arc(0, 0, 6, 0, Math.PI * 2);  g.fill();                                                                          // 금빛 중심
+      g.beginPath();  g.moveTo(0, -62);  g.lineTo(5, -70);  g.lineTo(0, -78);  g.lineTo(-5, -70);  g.closePath();  g.fill();              // 윗 장식
+      g.restore();
+    }
+  };
+  motif(64, 64, 0.85);  motif(192, 192, 0.85);
+  g.fillStyle = dot;
+  [[192, 64], [64, 192]].forEach(([x, y]) => { g.beginPath();  g.arc(x, y, 4, 0, Math.PI * 2);  g.fill(); });
+  return c;
+}
+function makeWainscotCanvas(c = {}) {                // 패널 한 칸 (옆으로 이어 붙임). 기본은 월넛, 색을 넘기면 다른 색 패널
+  const base = c.base || '#4b3121', inner = c.inner || '#3e281b', raised = c.raised || '#4f3423';
+  const groove = c.groove || 'rgba(0,0,0,.55)', light = c.light || 'rgba(255,220,170,.28)', light2 = c.light2 || 'rgba(255,220,170,.22)';
+  const S = 256, cv = document.createElement('canvas');  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  g.fillStyle = base;  g.fillRect(0, 0, S, S);
+  if (c.grain !== false) for (let i = 0; i < 40; i++) {   // 나뭇결
+    g.strokeStyle = `rgba(25,12,5,${0.05 + Math.random() * 0.1})`;  g.lineWidth = 1 + Math.random() * 2;
+    const y = Math.random() * S;
+    g.beginPath();  g.moveTo(0, y);  g.bezierCurveTo(S * 0.3, y + (Math.random() - 0.5) * 10, S * 0.7, y + (Math.random() - 0.5) * 10, S, y);  g.stroke();
+  }
+  g.fillStyle = inner;  g.fillRect(26, 26, S - 52, S - 52);                        // 안쪽으로 들어간 면
+  g.lineWidth = 3;
+  g.strokeStyle = groove;  g.strokeRect(26, 26, S - 52, S - 52);                   // 홈
+  g.strokeStyle = light;  g.beginPath();  g.moveTo(26, S - 26);  g.lineTo(S - 26, S - 26);  g.lineTo(S - 26, 26);  g.stroke();   // 아래·오른쪽 하이라이트
+  g.fillStyle = raised;  g.fillRect(50, 50, S - 100, S - 100);                      // 도드라진 가운데 면
+  g.strokeStyle = light2;  g.strokeRect(50, 50, S - 100, S - 100);
+  return cv;
+}
+const damaskCvs = makeDamaskCanvas(), wainCvs = makeWainscotCanvas();
+const repeatTex = cv => {                            // 벽마다 반복 횟수가 다르므로 벽마다 따로 텍스처를 만듦
+  const t = new THREE.CanvasTexture(cv);  t.encoding = THREE.sRGBEncoding;  t.anisotropy = maxAniso;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;  return t;
+};
+
+
+/* ---------- 벽 스타일 6종 (이미지 선택 → '벽' 탭에서 고름) ----------
+ * 윗벽 무늬 + 아랫벽 패널 + 몰딩 색을 한 세트로 바꿉니다. 4면 모두에 적용되고, 내가 고른 벽 이미지는 지워져요.
+ * ★ 한 줄(객체)만 추가하면 '벽' 탭에 버튼이 생겨요.
+ * name 버튼 이름 / swatch 색 견본 / top 윗벽 무늬 캔버스를 만드는 함수 / tile 무늬 한 장의 실제 크기(m) / wains 아랫벽 패널 캔버스 함수(없으면 null: 패널·의자 레일 없음)
+ * shell 벽 뒤쪽 바탕색 / base 걸레받이 / rail 의자 레일 / crown 천장 크라운 몰딩 / fillet 금빛 선 / rough 벽 거칠기 */
+function makeStripeCanvas() {                        // 네이비 세로줄 + 금빛 가는 선 (64px 한 주기 × 4)
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1b2944';  g.fillRect(0, 0, S, S);
+  for (let k = 0; k < 4; k++) {
+    const x = k * 64;
+    g.fillStyle = '#26385e';  g.fillRect(x + 6, 0, 40, S);
+    g.fillStyle = 'rgba(0,0,0,.14)';  g.fillRect(x + 46, 0, 3, S);
+    g.fillStyle = 'rgba(212,180,110,.55)';  g.fillRect(x + 54, 0, 2, S);
+  }
+  for (let i = 0; i < 1800; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * 0.04})`;  g.fillRect(Math.random() * S, Math.random() * S, 1, 1); }   // 직물 결
+  return c;
+}
+function makePaintCanvas() {                         // 모던 화이트: 은은한 얼룩의 매트한 페인트
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4f2ec';  g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 14; i++) wrapBlob(g, S, Math.random() * S, Math.random() * S, 50 + Math.random() * 90, Math.random() < 0.5 ? '255,255,255' : '170,160,140', 0.07);
+  for (let i = 0; i < 1500; i++) { g.fillStyle = `rgba(110,100,85,${Math.random() * 0.05})`;  g.fillRect(Math.random() * S, Math.random() * S, 1, 1); }
+  return c;
+}
+function makeConcreteWallCanvas() {                  // 노출 콘크리트: 얼룩 + 거푸집 이음선 + 타이 구멍
+  const S = 256, c = document.createElement('canvas');  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#8d9094';  g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 26; i++) wrapBlob(g, S, Math.random() * S, Math.random() * S, 30 + Math.random() * 80, Math.random() < 0.5 ? '210,212,216' : '60,62,68', 0.10);
+  for (let i = 0; i < 2500; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '40,40,46' : '220,220,225'},${Math.random() * 0.12})`;  g.fillRect(Math.random() * S, Math.random() * S, 1 + Math.random(), 1 + Math.random()); }
+  g.fillStyle = 'rgba(30,30,36,.35)';  g.fillRect(S - 2, 0, 2, S);  g.fillRect(0, S - 2, S, 2);     // 거푸집 이음선
+  [[64, 64], [192, 64], [64, 192], [192, 192]].forEach(([x, y]) => {                               // 타이 구멍
+    g.fillStyle = 'rgba(25,25,30,.75)';  g.beginPath();  g.arc(x, y, 3.5, 0, Math.PI * 2);  g.fill();
+    g.strokeStyle = 'rgba(230,230,235,.25)';  g.lineWidth = 1;  g.beginPath();  g.arc(x, y, 5, 0, Math.PI * 2);  g.stroke();
+  });
+  return c;
+}
+const WALL_STYLES = [
+  { name: '에메랄드 다마스크', swatch: '#2f4d40', top: () => damaskCvs, tile: 0.5, wains: () => wainCvs,
+    shell: 0x2f4d40, base: 0x2a1b12, rail: 0x6b4a2f, crown: 0xe9dfc8, fillet: 0xc9a24a, rough: 0.95 },
+  { name: '아이보리 석고',     swatch: '#efe6d0', top: () => makeDamaskCanvas('#efe6d0', 'rgba(150,130,90,0.16)', 'rgba(190,150,70,0.32)', 'rgba(190,150,70,0.26)'), tile: 0.5,
+    wains: () => makeWainscotCanvas({ base: '#e6dec9', inner: '#dbd2bb', raised: '#ece5d2', grain: false, groove: 'rgba(90,70,40,.30)', light: 'rgba(255,255,255,.7)', light2: 'rgba(255,255,255,.5)' }),
+    shell: 0xd9cfb6, base: 0xd8cdb2, rail: 0xcfc3a5, crown: 0xf6f0e0, fillet: 0xc9a24a, rough: 0.9 },
+  { name: '버건디 벨벳',       swatch: '#5a1620', top: () => makeDamaskCanvas('#5a1620', 'rgba(210,130,130,0.18)', 'rgba(212,180,110,0.40)', 'rgba(212,180,110,0.30)'), tile: 0.5, wains: () => wainCvs,
+    shell: 0x4a1119, base: 0x2a1b12, rail: 0x6b4a2f, crown: 0xe9dfc8, fillet: 0xc9a24a, rough: 0.98 },
+  { name: '네이비 스트라이프', swatch: 'repeating-linear-gradient(90deg,#1b2944 0 5px,#2e446f 5px 9px)', top: makeStripeCanvas, tile: 0.5,
+    wains: () => makeWainscotCanvas({ base: '#1a2540', inner: '#141e36', raised: '#1d2a47', grain: false, groove: 'rgba(0,0,0,.6)', light: 'rgba(170,190,255,.22)', light2: 'rgba(170,190,255,.16)' }),
+    shell: 0x1b2944, base: 0x0f1626, rail: 0x8a6d3b, crown: 0xe9e4d4, fillet: 0xc9a24a, rough: 0.9 },
+  { name: '모던 화이트',       swatch: '#f4f2ec', top: makePaintCanvas, tile: 1.2, wains: null,
+    shell: 0xdedbd3, base: 0xd6d3cb, rail: 0xd6d3cb, crown: 0xfafaf7, fillet: 0xeeeeea, rough: 0.9 },
+  { name: '노출 콘크리트',     swatch: '#8d9094', top: makeConcreteWallCanvas, tile: 1.2, wains: null,
+    shell: 0x7d8084, base: 0x2b2d30, rail: 0x2b2d30, crown: 0x3a3c40, fillet: 0x55585c, rough: 0.85 }
+];
+let curWall = 0;                                     // 지금 쓰는 벽 스타일 번호
+
+/* ---------- 벽 + 액자 + 스포트라이트 생성 ----------
+ * 벽 하나를 Group으로 묶고, Group의 로컬 +z가 '방 안쪽'을 향하도록 회전시킵니다.
+ * 이렇게 하면 액자/조명을 항상 같은 좌표(로컬 기준)로 배치할 수 있어요. */
+const walls = WALLS.map((info, i) => {
+  const group = new THREE.Group();
+  group.rotation.y = info.rotY;
+
+  // 바탕 벽(shell): 방을 빈틈없이 닫아 주는 짙은 톤의 벽. 방 전체 크기에 맞춰짐
+  const shell = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: 0x2f4d40, roughness: 0.95 }));
+  // 전시 벽면(wall): 이 벽만의 가로x세로 크기를 가짐. 바탕 벽보다 살짝 앞에 겹쳐 놓음
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ map: repeatTex(damaskCvs), color: 0xffffff, roughness: 0.95 }));
+  wall.position.z = 0.002;
+  group.add(shell, wall);
+
+  // 아랫벽 패널 + 몰딩 (재질은 벽마다 따로 — 3D에서 벽이 투명해질 때 다른 벽에 영향이 없도록)
+  const deco = new THREE.Group(), wainTex = repeatTex(wainCvs), bx = new THREE.BoxGeometry(1, 1, 1);
+  const part = (geo, mat) => { const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial(mat)); deco.add(m); return m; };
+  const parts = {
+    wains:  part(new THREE.PlaneGeometry(1, 1), { map: wainTex, roughness: 0.6 }),          // 목재 패널
+    base:   part(bx, { color: 0x2a1b12, roughness: 0.5 }),                                   // 걸레받이
+    rail:   part(bx, { color: 0x6b4a2f, roughness: 0.5 }),                                   // 의자 레일
+    crown:  part(bx, { color: 0xe9dfc8, roughness: 0.7 }),                                   // 천장 크라운 몰딩
+    fillet: part(bx, { color: 0xc9a24a, roughness: 0.4, metalness: 0.4 })                    // 금빛 선
+  };
+  group.add(deco);
+
+  // 액자 재료 3종: 나무 프레임 / 흰색 여백(매트) / 그림
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.45 });
+  const matMat  = new THREE.MeshStandardMaterial({ color: 0xfbfaf6, roughness: 1 });
+  const artMat  = new THREE.MeshStandardMaterial({ map: placeholderTexture('불러오는 중...'), roughness: 0.75 });
+
+  const frame = new THREE.Group();
+  frame.position.set(0, FRAME_Y, 0.004);
+  const plane = new THREE.PlaneGeometry(1, 1), box = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.Mesh(plane, matMat);  mat.position.z = 0.03;   // 여백: 벽에서 살짝 앞
+  const art = new THREE.Mesh(plane, artMat);  art.position.z = 0.04;   // 그림: 여백보다 조금 더 앞
+  // 프레임 4개 막대(위/아래/왼/오른) - 두께(depth)가 있어서 입체적으로 보임
+  const bars = [0, 1, 2, 3].map(() => new THREE.Mesh(box, woodMat));
+  frame.add(mat, art, ...bars);
+  group.add(frame);
+
+  // 액자를 비추는 스포트라이트 (천장 근처에서 액자 쪽으로)
+  const spot = new THREE.SpotLight(0xfff2dc, 0.9, 0, Math.PI / 5, 0.6, 1);
+  spot.position.set(0, ROOM_H - 0.2, 2.5);
+  spot.target.position.set(0, FRAME_Y, 0);
+  group.add(spot, spot.target);
+
+  scene.add(group);
+  return { i, group, shell, wall, frame, spot, art, artMat, mat, bars, aspect: 1.5, wpAspect: 1.5, hasWp: false, deco: { group: deco, parts, wainTex } };
+});
+
+walls.forEach(w => w.group.remove(w.frame));                // 기존에 고정돼 있던 액자 4개를 모두 제거 (이제 '오브젝트 > 액자'로 직접 생성)
+const frames = [];  let selFrame = null, frameSeq = 0, doorSeq = 0, editing = null;   // editing: 지금 이름·크기를 수정 중인 오브젝트
+const props = [], propNo = {};  let selProp = null;      // 바닥 오브젝트(벤치·조각상·진열장·화분) 목록 / 종류별 번호 / 선택한 것                    // 만든 액자 목록 / 현재 선택한 액자
+/* ---------- 액자 크기 자동 조절 (이미지 비율 유지) ----------
+ * 이미지 가로/세로 비율(aspect)에 맞춰 그림 → 여백 → 프레임 순으로 크기를 다시 계산합니다. */
+function fitFrame(w, aspect) {
+  w.aspect = aspect;                                 // 벽 크기가 바뀌면 다시 맞추기 위해 비율 저장
+  if (w.item) return;                                // 2D오브젝트는 만들 때 이미 크기에 맞춰 만들어져 있음
+  let iw, ih;
+  if (w.fw) { iw = w.fw; ih = w.fh; }                // 오브젝트 액자: 입력한 크기 그대로
+  else {                                             // (옛 방식) 벽 크기에 비례해 최대 크기를 제한하고 그림 비율에 맞춤
+    const wd = dims[w.i];
+    const maxW = Math.min(MAX_W, wd.w * 0.7), maxH = Math.min(MAX_H, wd.h * 0.6);
+    iw = maxW;  ih = iw / aspect;
+    if (ih > maxH) { ih = maxH; iw = ih * aspect; }
+  }
+  const sc = Math.min(1, iw / 2);                    // 작은 벽에서는 액자 테두리/두께도 같이 작아지게
+  const m = 0.12 * sc, t = 0.14 * sc, d = 0.12 * sc; // 여백 폭 / 프레임 굵기 / 프레임 두께
+  w.mat.position.z = 0.03 * sc;  w.art.position.z = 0.04 * sc;
+  const mw = iw + 2 * m, mh = ih + 2 * m;            // 여백(매트)까지 포함한 크기
+  w.art.scale.set(iw, ih, 1);
+  w.mat.scale.set(mw, mh, 1);
+  const [top, bottom, left, right] = w.bars;
+  top.scale.set(mw + 2 * t, t, d);     top.position.set(0,  (mh + t) / 2, d / 2);
+  bottom.scale.set(mw + 2 * t, t, d);  bottom.position.set(0, -(mh + t) / 2, d / 2);
+  left.scale.set(t, mh, d);            left.position.set(-(mw + t) / 2, 0, d / 2);
+  right.scale.set(t, mh, d);           right.position.set((mw + t) / 2, 0, d / 2);
+}
+
+/* ---------- 오브젝트1: 액자 (생성 · 끌어서 이동 · 그림 교체 · 삭제) ----------
+ * 액자는 '걸려 있는 벽 그룹'의 자식이라서 벽 기준 좌표(x: 가로 위치, y: 높이)로 위치를 저장합니다. */
+function coverTexture(tex, A) {                      // 그림을 액자 비율(A=가로/세로)에 '꽉 채우기': 늘어나지 않고 넘치는 부분만 잘림
+  const I = tex.image.width / tex.image.height;
+  if (I > A) { tex.repeat.set(A / I, 1); tex.offset.set((1 - A / I) / 2, 0); }
+  else       { tex.repeat.set(1, I / A); tex.offset.set(0, (1 - I / A) / 2); }
+}
+function loadFrameImage(f, url) {                    // 액자 안 그림 적용 (기본 이미지 & 업로드 공용)
+  f.src = url;                                       // 세이브할 때 쓰기 위해 출처 기억
+  loader.load(url, tex => {
+    if (f.removed) { tex.dispose(); return; }
+    tex.encoding = THREE.sRGBEncoding;  tex.anisotropy = maxAniso;
+    coverTexture(tex, f.fw / f.fh);
+    if (f.artMat.map) f.artMat.map.dispose();
+    f.artMat.map = tex;  f.artMat.needsUpdate = true;
+    if (url.startsWith('blob:')) { if (f.blob) URL.revokeObjectURL(f.blob); f.blob = url; }
+  }, undefined, () => {
+    if (f.removed) return;
+    const ph = placeholderTexture('이미지를 불러올 수 없어요');  coverTexture(ph, f.fw / f.fh);
+    f.artMat.map = ph;  f.artMat.needsUpdate = true;
+  });
+}
+
+function placeFrame(f, wi, u, v) {                   // 액자를 wi번 벽의 (u, v)에 놓기. 벽 밖으로는 못 나가게 제한
+  const w = walls[wi], d = dims[wi];
+  if (f.group.parent !== w.group) { w.group.add(f.group); f.i = wi; fitFrame(f, f.aspect); wallTreeVer++; }   // 다른 벽으로 옮겨지면 부모 교체
+  const hw = f.item ? f.fw / 2 : f.bars[0].scale.x / 2, hh = f.item ? f.fh / 2 : f.bars[2].scale.y / 2 + f.bars[0].scale.y;           // 액자 바깥 절반 크기
+  const ux = Math.max(0, d.w / 2 - hw);
+  const lo = f.kind === 'door' ? f.fh / 2 : Math.min(hh, d.h / 2), hi = f.kind === 'door' ? f.fh / 2 : Math.max(d.h - hh, d.h / 2);   // 문은 바닥에 붙어 높이 고정
+  f.group.position.set(clamp(u, -ux, ux), clamp(v, lo, hi), 0.004);
+}
+
+let forceWall = null;                                // 세이브 파일을 불러오는 동안만 쓰는 '이 벽에 만들어라' 지정
+function facingWall() {                              // 지금 시점에서 정면으로 보이는 벽 번호
+  if (forceWall !== null) return forceWall;
+  if (mode === 'wall') return wallView;
+  if (mode === 'top') return (topSide + 2) % 4;      // 3D: 투명해진 벽의 맞은편
+  const dirX = -Math.sin(yaw), dirZ = -Math.cos(yaw);   // 지금 바라보는 방향 (전역 fx(바닥 캔버스)와 이름이 겹치지 않게 변경)
+  let best = 0, bd = 9;
+  walls.forEach((w, i) => {
+    const d = dirX * Math.sin(w.group.rotation.y) + dirZ * Math.cos(w.group.rotation.y);
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+
+function selectFrame(f) {                            // 선택한 액자는 프레임이 밝게 빛나고, 우측 패널이 열림
+  if (selFrame) selFrame.woodMat.emissive.setHex(0x000000);
+  selFrame = f || null;
+  if (selFrame) selFrame.woodMat.emissive.setHex(0x5a4020);
+  if (f && selProp) selectProp(null);
+  updatePanel();
+  frames.forEach(o => { if (o.entry) o.entry.classList.toggle('sel', o === selFrame); });   // 이미지 선택 목록에서도 표시
+}
+
+function createFrame(wCm, hCm, name, src) {                     // 오브젝트1 '액자' 만들기: 입력한 크기로, 지금 보는 벽에 생성
+  const wi = facingWall(), d = dims[wi], k = frames.length;
+  const w = Math.min(clamp(wCm, 5, 1000) / 100, d.w * 0.9), h = Math.min(clamp(hCm, 5, 400) / 100, d.h * 0.9);   // 벽보다 크면 줄임
+  const ph = placeholderTexture('불러오는 중...');  coverTexture(ph, w / h);
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.45 });
+  const matMat  = new THREE.MeshStandardMaterial({ color: 0xfbfaf6, roughness: 1 });
+  const artMat  = new THREE.MeshStandardMaterial({ map: ph, roughness: 0.75 });
+  const plane = new THREE.PlaneGeometry(1, 1), box = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.Mesh(plane, matMat), art = new THREE.Mesh(plane, artMat);
+  const bars = [0, 1, 2, 3].map(() => new THREE.Mesh(box, woodMat));
+  const group = new THREE.Group();
+  group.add(mat, art, ...bars);
+  const f = { i: wi, group, mat, art, bars, artMat, woodMat, aspect: w / h, fw: w, fh: h, no: ++frameSeq };
+  f.name = (name || '').trim().slice(0, 20) || `액자 ${f.no}`;       // 입력한 이름 (비우면 '액자 N')
+  f.title = `${f.name} (${Math.round(w * 100)}cm × ${Math.round(h * 100)}cm)`;
+  group.userData.frame = f;
+  const n = frames.filter(o => o.i === wi).length;   // 같은 벽에 여러 개면 겹치지 않게 조금씩 옆으로
+  frames.push(f);
+  placeFrame(f, wi, ((n % 5) - 2) * 0.5, Math.min(FRAME_Y, d.h * 0.55));
+  // 이미지 선택 패널의 '액자이미지' 목록에 이 액자 전용 버튼 추가
+  const up = makeUpload('', '기본 이미지', url => loadFrameImage(f, url));
+  up.label.querySelector('b').textContent = f.title;   // 이름은 textContent로 넣어 안전하게 표시
+  f.entry = up.label;
+  f.entry.addEventListener('click', () => selectFrame(f));
+  $('frameList').appendChild(f.entry);
+  refreshFrameTab();
+  loadFrameImage(f, src || artworkImages[1 + k % 3]);   // 기본 그림 (세이브 파일에서 불러올 때는 저장된 그림) (위쪽 artworkImages 목록을 돌려 씀)
+  selectFrame(f);
+}
+
+function doorTexture() {                            // 문짝 무늬: 세로 나뭇결 + 위·아래 장식 패널 (캔버스로 그림)
+  const c = document.createElement('canvas');  c.width = 256;  c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#6b4a2f';  g.fillRect(0, 0, 256, 512);
+  for (let i = 0; i < 60; i++) {
+    const x = Math.random() * 256;
+    g.strokeStyle = `rgba(30,15,5,${0.06 + Math.random() * 0.1})`;  g.lineWidth = 1 + Math.random() * 2;
+    g.beginPath();  g.moveTo(x, 0);  g.lineTo(x + (Math.random() - 0.5) * 14, 512);  g.stroke();
+  }
+  [[40, 40, 176, 190], [40, 282, 176, 190]].forEach(([x, y, w, h]) => {
+    g.fillStyle = '#7d5a3b';  g.fillRect(x, y, w, h);
+    g.strokeStyle = 'rgba(20,10,0,.55)';  g.lineWidth = 4;  g.strokeRect(x, y, w, h);
+    g.strokeStyle = 'rgba(255,230,190,.25)';  g.lineWidth = 2;  g.strokeRect(x + 5, y + 5, w - 10, h - 10);
+  });
+  const t = new THREE.CanvasTexture(c);
+  t.encoding = THREE.sRGBEncoding;  t.anisotropy = maxAniso;
+  return t;
+}
+
+function createDoor(wCm, hCm, name) {                // 오브젝트6 '문': 바닥에 붙어 있고, 끌면 벽을 따라(다른 벽으로도) 움직임
+  const wi = facingWall(), d = dims[wi];
+  const w = Math.min(clamp(wCm, 30, 600) / 100, d.w * 0.9), h = Math.min(clamp(hCm, 50, 400) / 100, d.h * 0.98);   // 벽보다 크면 줄임
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 0.8 });                    // 문틀 (흰색)
+  const matMat  = new THREE.MeshStandardMaterial({ color: 0x1d140d, roughness: 1 });                      // 문짝과 문틀 사이 그늘진 틈
+  const artMat  = new THREE.MeshStandardMaterial({ map: doorTexture(), roughness: 0.6 });                 // 문짝
+  const knobMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.3, metalness: 0.8 });    // 황동 손잡이
+  const plane = new THREE.PlaneGeometry(1, 1), box = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.Mesh(plane, matMat), art = new THREE.Mesh(plane, artMat);
+  const bars = [0, 1, 2, 3].map(() => new THREE.Mesh(box, woodMat));
+  bars[1].visible = false;                           // 아래쪽 문틀(문턱)은 없음
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 16, 12), knobMat);
+  const group = new THREE.Group();
+  group.add(mat, art, ...bars, knob);
+  const f = { i: wi, kind: 'door', group, mat, art, bars, artMat, woodMat, aspect: w / h, fw: w, fh: h };
+  const no = ++doorSeq;
+  f.name = (name || '').trim().slice(0, 20) || `문 ${no}`;            // 이름을 비우면 '문 1' 처럼
+  f.title = `${f.name} (${Math.round(w * 100)}cm × ${Math.round(h * 100)}cm)`;
+  group.userData.frame = f;                          // 액자와 같은 방식으로 선택·끌기·삭제됨
+  const n = frames.filter(o => o.i === wi).length;
+  frames.push(f);
+  placeFrame(f, wi, ((n % 5) - 2) * 0.5, h / 2);
+  f.knob = knob;  layoutKnob(f);
+  selectFrame(f);
+}
+
+function layoutKnob(f) {                             // 문 손잡이 위치·크기: 문 오른쪽, 바닥에서 약 1m (작은 문에선 같이 작아짐)
+  const w = f.fw, h = f.fh, s = Math.min(1, w);
+  f.knob.scale.setScalar(s);
+  f.knob.position.set(w / 2 - 0.1 * s, Math.min(1, h * 0.45) - h / 2, 0.04 * Math.min(1, w / 2) + 0.04);
+}
+
+function editFrame(f, name, wCm, hCm) {              // 액자·문의 이름과 크기 수정
+  if (f.item) {                                      // 2D오브젝트: 이름·크기를 바꾸고 모양을 다시 만듦
+    f.name = (name || '').trim().slice(0, 20) || f.name;
+    setItemSize(f, wCm, hCm);
+    placeFrame(f, f.i, f.group.position.x, f.group.position.y);
+    if (selFrame === f) f.woodMat.emissive.setHex(0x5a4020);   // 새로 만든 도형에도 선택 표시
+    updatePanel();
+    return;
+  }
+  const door = f.kind === 'door', d = dims[f.i];
+  const w = Math.min(clamp(wCm, door ? 30 : 5, door ? 600 : 1000) / 100, d.w * 0.9);
+  const h = Math.min(clamp(hCm, door ? 50 : 5, 400) / 100, d.h * (door ? 0.98 : 0.9));       // 벽보다 크면 줄임
+  f.fw = w;  f.fh = h;  f.aspect = w / h;
+  fitFrame(f, f.aspect);                             // 새 크기로 그림·여백·프레임 다시 계산
+  if (door) layoutKnob(f);
+  else if (f.artMat.map) coverTexture(f.artMat.map, w / h);   // 그림을 새 비율에 맞춰 다시 꽉 채움
+  placeFrame(f, f.i, f.group.position.x, door ? h / 2 : f.group.position.y);   // 벽 안으로 다시 맞춤
+  f.name = (name || '').trim().slice(0, 20) || f.name;          // 이름을 비우면 기존 이름 유지
+  f.title = `${f.name} (${Math.round(w * 100)}cm × ${Math.round(h * 100)}cm)`;
+  if (f.entry) f.entry.querySelector('b').textContent = f.title;   // 이미지 선택 목록의 이름도 갱신
+  updatePanel();
+}
+
+function editProp(p, name, wCm, hCm) {               // 바닥 소품의 이름과 크기 수정: 모양을 새 크기로 다시 만듦
+  const w = clamp(wCm, 10, 600) / 100, h = clamp(hCm, 10, 400) / 100;
+  buildProp(p, w, h);
+  p.name = (name || '').trim().slice(0, 20) || p.name;
+  p.title = `${p.name} (${Math.round(w * 100)}cm × ${Math.round(h * 100)}cm)`;
+  placeProp(p, p.group.position.x, p.group.position.z);          // 크기가 바뀌었으니 방 안으로 다시 맞춤
+  glow(p.group, 0x4a3818);                           // 새로 만든 도형에도 선택 표시
+  updatePanel();
+}
+
+function removeFrame(f) {
+  f.removed = true;
+  if (f.group.parent) f.group.parent.remove(f.group);
+  wallTreeVer++;
+  f.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+  if (f.blob) URL.revokeObjectURL(f.blob);
+  frames.splice(frames.indexOf(f), 1);
+  if (f.entry) f.entry.remove();                     // 이미지 선택 목록에서도 삭제
+  refreshFrameTab();
+  if (selFrame === f) selectFrame(null);
+}
+
+/* ---------- 오브젝트2~5, 7~14: 바닥에 놓는 전시관 소품 (벤치 · 조각상 · 진열장 · 화분 · 기둥 · 로프 · 좌대 · 흉상 · 이젤 · 의자 · 설명대 · 데스크) ----------
+ * 도형(상자·원기둥 등)을 조합해 만들고, 바닥 위(x, z)에서 끌어 옮기거나 90° 돌릴 수 있습니다. */
+function paintingTexture() {                         // 이젤 위 캔버스에 걸 추상화를 즉석에서 그림 (제네레이티브)
+  const c = document.createElement('canvas');  c.width = 320;  c.height = 240;
+  const g = c.getContext('2d'), hue = Math.random() * 360;
+  g.fillStyle = `hsl(${hue}, 25%, 92%)`;  g.fillRect(0, 0, 320, 240);
+  for (let i = 0; i < 14; i++) {
+    const x = Math.random() * 320, y = Math.random() * 240, r = 20 + Math.random() * 70, h2 = (hue + Math.random() * 160) % 360;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, `hsla(${h2}, 70%, 55%, 0.85)`);  gr.addColorStop(1, `hsla(${h2}, 70%, 55%, 0)`);
+    g.fillStyle = gr;  g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  g.lineWidth = 3;
+  for (let i = 0; i < 5; i++) {
+    g.strokeStyle = `hsla(${(hue + 180) % 360}, 60%, 25%, 0.7)`;
+    g.beginPath();  g.moveTo(Math.random() * 320, Math.random() * 240);
+    g.bezierCurveTo(Math.random() * 320, Math.random() * 240, Math.random() * 320, Math.random() * 240, Math.random() * 320, Math.random() * 240);  g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);  t.encoding = THREE.sRGBEncoding;  t.anisotropy = maxAniso;
+  return t;
+}
+function plaqueTexture() {                           // 작품 설명판: 제목 + 설명 줄무늬
+  const c = document.createElement('canvas');  c.width = 256;  c.height = 180;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4f1e8';  g.fillRect(0, 0, 256, 180);
+  g.fillStyle = '#222';  g.fillRect(18, 20, 130, 14);
+  g.fillStyle = '#777';  g.fillRect(18, 42, 80, 7);
+  g.fillStyle = '#aaa';
+  for (let i = 0; i < 6; i++) g.fillRect(18, 70 + i * 16, 220 - (i % 3) * 30, 6);
+  const t = new THREE.CanvasTexture(c);  t.encoding = THREE.sRGBEncoding;  t.anisotropy = maxAniso;
+  return t;
+}
+
+function clockTexture() {                            // 괘종시계 문자판
+  const c = document.createElement('canvas');  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f6f0dc';  g.beginPath();  g.arc(64, 64, 62, 0, Math.PI * 2);  g.fill();
+  g.strokeStyle = '#6e4f17';  g.lineWidth = 4;  g.stroke();
+  g.strokeStyle = '#222';  g.lineWidth = 3;
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    g.beginPath();  g.moveTo(64 + Math.sin(a) * 50, 64 - Math.cos(a) * 50);  g.lineTo(64 + Math.sin(a) * 58, 64 - Math.cos(a) * 58);  g.stroke();
+  }
+  g.lineWidth = 5;  g.beginPath();  g.moveTo(64, 64);  g.lineTo(64 - 22, 64 - 24);  g.stroke();    // 시침
+  g.lineWidth = 3;  g.beginPath();  g.moveTo(64, 64);  g.lineTo(64 + 34, 64 - 28);  g.stroke();    // 분침
+  const t = new THREE.CanvasTexture(c);  t.encoding = THREE.sRGBEncoding;  t.anisotropy = maxAniso;
+  return t;
+}
+function signTexture() {                             // 안내 입간판: 칠판 느낌의 판 + 화살표와 글줄
+  const c = document.createElement('canvas');  c.width = 200;  c.height = 300;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1f3a2e';  g.fillRect(0, 0, 200, 300);
+  g.strokeStyle = '#e9e5d6';  g.lineWidth = 4;  g.strokeRect(10, 10, 180, 280);
+  g.fillStyle = '#e9e5d6';  g.fillRect(30, 36, 110, 14);
+  g.beginPath();  g.moveTo(30, 120);  g.lineTo(110, 120);  g.lineTo(110, 98);  g.lineTo(160, 130);  g.lineTo(110, 162);  g.lineTo(110, 140);  g.lineTo(30, 140);  g.closePath();  g.fill();   // 화살표
+  g.fillStyle = 'rgba(233,229,214,.65)';
+  for (let i = 0; i < 4; i++) g.fillRect(30, 195 + i * 18, 140 - (i % 2) * 40, 7);
+  const t = new THREE.CanvasTexture(c);  t.encoding = THREE.sRGBEncoding;  t.anisotropy = maxAniso;
+  return t;
+}
+
+function buildProp(p, w, h) {                        // 소품 모양 만들기: 처음 만들 때와 크기를 수정할 때 모두 사용 (w, h는 m)
+  const g = p.group, kind = p.kind;
+  while (g.children.length) {                        // 이전 모양이 있으면 정리
+    const o = g.children[0];  g.remove(o);
+    o.traverse(d => { if (d.geometry) d.geometry.dispose(); if (d.material) { if (d.material.map) d.material.map.dispose(); d.material.dispose(); } });
+  }
+  const M = (color, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.6 }, o));
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); g.add(m); return m; };
+  let hx = w / 2, hz = w / 2;                        // 바닥에서 차지하는 절반 크기 (방 밖으로 못 나가게 제한)
+  if (kind === 'bench') {                            // w: 길이, h: 깊이
+    const seatH = 0.45;
+    add(new THREE.BoxGeometry(w, 0.06, h), M(0x8a5a35), 0, seatH, 0);                                  // 의자판
+    [-1, 1].forEach(k => add(new THREE.BoxGeometry(0.06, seatH, h * 0.85), M(0x2b2b2e, { metalness: 0.3 }), k * (w / 2 - 0.12), seatH / 2, 0));   // 다리
+    hz = h / 2;
+  } else if (kind === 'statue') {                    // w: 받침대 폭, h: 전체 높이
+    const ph = h * 0.55, r = Math.min(w * 0.45, (h - ph) * 0.4);
+    add(new THREE.BoxGeometry(w, ph, w), M(0xf2f0ea, { roughness: 0.9 }), 0, ph / 2, 0);              // 받침대
+    add(new THREE.TorusKnotGeometry(r, r * 0.3, 96, 12), M(0xb8892f, { metalness: 0.7, roughness: 0.3 }), 0, ph + (h - ph) / 2, 0);   // 조각
+  } else if (kind === 'case') {                      // w: 가로(깊이도 같음), h: 전체 높이
+    const bh = h * 0.4, rr = Math.min(w, h - bh) * 0.22;
+    add(new THREE.BoxGeometry(w, bh, w), M(0xf2f0ea, { roughness: 0.9 }), 0, bh / 2, 0);              // 받침
+    add(new THREE.BoxGeometry(w * 0.98, h - bh, w * 0.98), M(0xcfe8ff, { transparent: true, opacity: 0.25, roughness: 0.1, depthWrite: false }), 0, bh + (h - bh) / 2, 0);   // 유리
+    add(new THREE.SphereGeometry(rr, 24, 16), M(0xc0392b, { roughness: 0.3 }), 0, bh + rr, 0);         // 전시품
+  } else if (kind === 'column') {                    // 대리석 기둥. w: 기둥 지름, h: 전체 높이
+    const bh = Math.min(0.15, h * 0.06), bw = w * 1.45, marble = M(0xece9e1, { roughness: 0.5 });
+    add(new THREE.BoxGeometry(bw, bh, bw), marble, 0, bh / 2, 0);                                      // 주춧돌
+    add(new THREE.CylinderGeometry(w * 0.46, w * 0.5, h - bh * 2, 32), marble, 0, h / 2, 0);            // 기둥 몸통
+    add(new THREE.BoxGeometry(bw, bh, bw), marble, 0, h - bh / 2, 0);                                   // 기둥머리
+    for (let i = 0; i < 16; i++) {                                                                      // 세로 홈 무늬
+      const a = i / 16 * Math.PI * 2;
+      add(new THREE.CylinderGeometry(w * 0.02, w * 0.02, h - bh * 2 - 0.1, 6), M(0xd6d2c6, { roughness: 0.6 }), Math.cos(a) * w * 0.47, h / 2, Math.sin(a) * w * 0.47);
+    }
+    hx = hz = bw / 2;
+  } else if (kind === 'rope') {                      // 로프 안전선. w: 두 기둥 사이 길이, h: 기둥 높이
+    const gold = M(0xc9a24a, { metalness: 0.8, roughness: 0.25 });
+    [-1, 1].forEach(k => {
+      add(new THREE.CylinderGeometry(0.12, 0.13, 0.03, 24), gold, k * w / 2, 0.015, 0);                 // 받침
+      add(new THREE.CylinderGeometry(0.022, 0.026, h, 12), gold, k * w / 2, h / 2, 0);                  // 기둥
+      add(new THREE.SphereGeometry(0.045, 16, 12), gold, k * w / 2, h, 0);                              // 꼭지
+    });
+    const top = h * 0.9, sag = Math.min(h * 0.25, w * 0.12), pts = [];
+    for (let i = 0; i <= 16; i++) { const t = i / 16 * 2 - 1; pts.push(new THREE.Vector3(t * w / 2, top - sag * (1 - t * t), 0)); }   // 처진 로프 곡선
+    add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.014, 8), M(0x8e1b2c, { roughness: 0.7 }), 0, 0, 0);
+    hx = w / 2 + 0.14;  hz = 0.14;
+  } else if (kind === 'vase') {                      // 도자기 좌대. w: 좌대 폭, h: 전체 높이
+    const ph = h * 0.58, vh = h - ph - 0.04, rv = Math.min(w * 0.4, vh * 0.32), marble = M(0xf2f0ea, { roughness: 0.9 });
+    add(new THREE.BoxGeometry(w, ph, w), marble, 0, ph / 2, 0);                                         // 좌대
+    add(new THREE.BoxGeometry(w * 1.1, 0.04, w * 1.1), marble, 0, ph + 0.02, 0);                        // 좌대 윗판
+    const prof = [[0.001, 0], [0.45, 0], [0.6, 0.08], [1, 0.4], [0.88, 0.72], [0.42, 0.86], [0.5, 1]].map(([x, y]) => new THREE.Vector2(x * rv, y * vh));
+    add(new THREE.LatheGeometry(prof, 32), M(0x2c5f8e, { roughness: 0.2, metalness: 0.1, side: THREE.DoubleSide }), 0, ph + 0.04, 0);   // 청자 항아리
+    hx = hz = w * 0.55;
+  } else if (kind === 'bust') {                      // 흉상. w: 받침대 폭, h: 전체 높이
+    const ph = h * 0.55, bh = h - ph, sr = Math.min(bh * 0.3, w * 0.34), hr = Math.min(bh * 0.22, sr * 0.8);
+    const bronze = M(0x8a6a3c, { metalness: 0.6, roughness: 0.35 }), nh = hr * 0.9;
+    add(new THREE.BoxGeometry(w, ph, w), M(0xf2f0ea, { roughness: 0.9 }), 0, ph / 2, 0);                // 받침대
+    add(new THREE.SphereGeometry(sr, 24, 16), bronze, 0, ph + sr * 0.55, 0).scale.set(1.3, 0.6, 0.8);   // 어깨
+    add(new THREE.CylinderGeometry(hr * 0.45, hr * 0.55, nh, 16), bronze, 0, ph + sr + nh / 2, 0);      // 목
+    add(new THREE.SphereGeometry(hr, 24, 16), bronze, 0, ph + sr + nh * 0.8 + hr * 1.2, 0).scale.set(0.9, 1.2, 1);   // 머리
+    hx = hz = w * 0.5;
+  } else if (kind === 'easel') {                     // 이젤과 그림. w: 캔버스 폭, h: 전체 높이
+    const wood = M(0xa9783f, { roughness: 0.7 }), t = 0.04, cH = Math.min(w * 0.75, h * 0.62), ledgeY = h * 0.26;
+    const foot = Math.max(w * 0.55, 0.3), backZ = -Math.max(h * 0.28, 0.3);
+    const bar = (x1, y1, z1, x2, y2, z2) => {        // 두 점을 잇는 막대 (이젤 다리)
+      const a = new THREE.Vector3(x1, y1, z1), b = new THREE.Vector3(x2, y2, z2), d = b.clone().sub(a), len = d.length();
+      const m = new THREE.Mesh(new THREE.BoxGeometry(t, len, t), wood);
+      m.position.copy(a).add(b).multiplyScalar(0.5);  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());  g.add(m);
+    };
+    bar(-foot, 0, -0.1, -0.05, h * 0.97, -0.03);  bar(foot, 0, -0.1, 0.05, h * 0.97, -0.03);  bar(0, 0, backZ, 0, h * 0.8, -0.05);
+    add(new THREE.BoxGeometry(0.05, h, 0.03), wood, 0, h / 2, 0);                                       // 가운데 기둥
+    add(new THREE.BoxGeometry(w * 1.06, 0.03, 0.1), wood, 0, ledgeY, 0.06);                             // 캔버스 받침대
+    add(new THREE.BoxGeometry(w * 0.5, 0.03, 0.05), wood, 0, ledgeY + 0.015 + cH + 0.01, 0.075);        // 윗고정대
+    add(new THREE.BoxGeometry(w, cH, 0.03), new THREE.MeshStandardMaterial({ map: paintingTexture(), roughness: 0.8 }), 0, ledgeY + 0.015 + cH / 2, 0.045);   // 그림
+    hx = foot + 0.05;  hz = -backZ + 0.05;
+  } else if (kind === 'ottoman') {                   // 원형 관람 의자. w: 지름, h: 높이
+    const bh = Math.min(0.06, h * 0.2), cushion = M(0x7b1e2b, { roughness: 0.9 });
+    add(new THREE.CylinderGeometry(w * 0.46, w * 0.44, bh, 32), M(0x2b2b2e, { metalness: 0.4 }), 0, bh / 2, 0);   // 받침
+    add(new THREE.CylinderGeometry(w * 0.5, w * 0.5, h - bh, 32), cushion, 0, bh + (h - bh) / 2, 0);              // 쿠션
+    add(new THREE.TorusGeometry(w * 0.5, Math.min(0.03, (h - bh) * 0.15), 12, 40), cushion, 0, h, 0).rotation.x = Math.PI / 2;   // 둥근 모서리
+    hx = hz = w / 2;
+  } else if (kind === 'plaque') {                    // 작품 설명대. w: 설명판 폭, h: 전체 높이
+    const bh = Math.min(w * 0.7, h * 0.4), metal = M(0x2b2b2e, { metalness: 0.5, roughness: 0.4 }), postH = h - bh * 0.4;
+    add(new THREE.CylinderGeometry(Math.max(w * 0.4, 0.15), Math.max(w * 0.4, 0.15), 0.03, 24), metal, 0, 0.015, 0);   // 받침
+    add(new THREE.CylinderGeometry(0.02, 0.02, postH, 12), metal, 0, postH / 2, 0);                     // 기둥
+    const pivot = new THREE.Group();  pivot.position.set(0, h - bh * 0.45, 0);  pivot.rotation.x = -0.55;  g.add(pivot);   // 뒤로 살짝 기울인 설명판
+    pivot.add(new THREE.Mesh(new THREE.BoxGeometry(w, bh, 0.025), M(0x1f2430, { roughness: 0.5 })));
+    const paper = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, bh * 0.85), new THREE.MeshStandardMaterial({ map: plaqueTexture(), roughness: 0.8 }));
+    paper.position.z = 0.0135;  pivot.add(paper);
+    hx = hz = Math.max(w / 2, 0.2);
+  } else if (kind === 'desk') {                      // 안내 데스크. w: 길이, h: 깊이 (높이는 1m 고정)
+    const dh = 1.0;
+    add(new THREE.BoxGeometry(w, dh, h), M(0xf4f2ec, { roughness: 0.8 }), 0, dh / 2, 0);                // 몸체
+    add(new THREE.BoxGeometry(w + 0.06, 0.05, h + 0.06), M(0x2b2a2e, { roughness: 0.3, metalness: 0.2 }), 0, dh + 0.025, 0);   // 상판
+    add(new THREE.BoxGeometry(w * 0.98, 0.04, 0.01), M(0xc9a24a, { metalness: 0.8, roughness: 0.25 }), 0, dh * 0.55, h / 2 + 0.005);   // 앞면 금장 띠
+    hx = w / 2 + 0.03;  hz = h / 2 + 0.03;
+  } else if (kind === 'fountain') {                  // 분수대. w: 지름, h: 전체 높이
+    const stone = M(0xd9d5ca, { roughness: 0.8 }), bh = h * 0.28;
+    add(new THREE.CylinderGeometry(w * 0.5, w * 0.52, bh, 40), stone, 0, bh / 2, 0);                    // 수조
+    add(new THREE.TorusGeometry(w * 0.47, 0.04, 10, 48), stone, 0, bh, 0).rotation.x = Math.PI / 2;     // 테두리
+    add(new THREE.CylinderGeometry(w * 0.44, w * 0.44, 0.01, 40), M(0x6fb6d9, { roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.8 }), 0, bh + 0.005, 0);   // 물
+    const ph = h * 0.78 - bh;
+    add(new THREE.CylinderGeometry(w * 0.05, w * 0.07, ph, 16), stone, 0, bh + ph / 2, 0);              // 가운데 기둥
+    add(new THREE.CylinderGeometry(w * 0.22, w * 0.06, 0.08, 24), stone, 0, h * 0.78 + 0.04, 0);        // 윗 물받이
+    add(new THREE.CylinderGeometry(0.012, 0.02, h * 0.18, 8), M(0xbfe6ff, { transparent: true, opacity: 0.6, roughness: 0.1 }), 0, h * 0.82 + h * 0.09, 0);   // 물줄기
+    hx = hz = w * 0.53;
+  } else if (kind === 'lamp') {                      // 스탠드 조명. w: 갓 지름, h: 전체 높이
+    const metal = M(0x2b2b2e, { metalness: 0.5, roughness: 0.4 });
+    add(new THREE.CylinderGeometry(w * 0.35, w * 0.38, 0.03, 24), metal, 0, 0.015, 0);                  // 받침
+    add(new THREE.CylinderGeometry(0.015, 0.015, h * 0.95, 8), metal, 0, h * 0.475, 0);                 // 기둥
+    add(new THREE.CylinderGeometry(w * 0.3, w * 0.5, h * 0.18, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff1c9, side: THREE.DoubleSide }), 0, h - h * 0.09, 0);   // 불 켜진 갓
+    add(new THREE.SphereGeometry(w * 0.1, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }), 0, h - h * 0.12, 0);   // 전구
+    hx = hz = w * 0.5;
+  } else if (kind === 'sofa') {                      // 소파. w: 길이, h: 깊이 (등받이 높이 약 0.7m)
+    const fab = M(0x3b4a5a, { roughness: 0.95 }), fab2 = M(0x33414f, { roughness: 0.95 });
+    add(new THREE.BoxGeometry(w - 0.3, 0.28, h), fab2, 0, 0.14, 0);                                      // 몸체
+    add(new THREE.BoxGeometry(w - 0.3, 0.14, h * 0.78), fab, 0, 0.35, h * 0.11);                        // 방석
+    add(new THREE.BoxGeometry(w - 0.3, 0.4, h * 0.22), fab2, 0, 0.48, -h * 0.39);                       // 등받이
+    [-1, 1].forEach(k => add(new THREE.BoxGeometry(0.15, 0.55, h), fab2, k * (w / 2 - 0.075), 0.275, 0));   // 팔걸이
+    hx = w / 2;  hz = h / 2;
+  } else if (kind === 'clock') {                     // 괘종시계. w: 폭, h: 높이
+    const wood = M(0x5a3a22, { roughness: 0.5 }), d = w * 0.6, gold = M(0xc9a24a, { metalness: 0.8, roughness: 0.3 });
+    add(new THREE.BoxGeometry(w * 1.1, h * 0.08, d * 1.05), wood, 0, h * 0.04, 0);                      // 받침
+    add(new THREE.BoxGeometry(w * 0.8, h * 0.6, d * 0.85), wood, 0, h * 0.38, 0);                       // 몸통
+    add(new THREE.BoxGeometry(w, h * 0.24, d), wood, 0, h * 0.8, 0);                                    // 시계 머리
+    add(new THREE.BoxGeometry(w * 1.1, h * 0.04, d * 1.05), wood, 0, h * 0.94, 0);                      // 윗덮개
+    add(new THREE.CircleGeometry(w * 0.36, 32), new THREE.MeshStandardMaterial({ map: clockTexture(), roughness: 0.5 }), 0, h * 0.8, d / 2 + 0.002);   // 문자판
+    add(new THREE.PlaneGeometry(w * 0.4, h * 0.35), M(0x201510, { roughness: 0.4 }), 0, h * 0.38, d * 0.425 + 0.002);   // 추 창
+    add(new THREE.CylinderGeometry(w * 0.12, w * 0.12, 0.012, 24), gold, 0, h * 0.28, d * 0.425 + 0.01).rotation.x = Math.PI / 2;   // 금빛 추
+    add(new THREE.BoxGeometry(0.01, h * 0.2, 0.005), gold, 0, h * 0.42, d * 0.425 + 0.006);              // 추 막대
+    hx = w * 0.55;  hz = d * 0.55;
+  } else if (kind === 'partition') {                 // 전시 파티션(이동식 벽). w: 폭, h: 높이
+    add(new THREE.BoxGeometry(w, h - 0.05, 0.05), M(0xf6f5f1, { roughness: 0.95 }), 0, 0.05 + (h - 0.05) / 2, 0);   // 판
+    [-1, 1].forEach(k => add(new THREE.BoxGeometry(0.06, 0.05, 0.5), M(0x2b2b2e, { metalness: 0.4 }), k * Math.max(0, w / 2 - 0.15), 0.025, 0));   // 받침발
+    hx = w / 2;  hz = 0.27;
+  } else if (kind === 'platform') {                  // 계단형 전시 단상. w: 아래단 폭, h: 전체 높이
+    const s = h / 3;
+    [0xe9e5da, 0xdedad0, 0xd2cec3].forEach((c, i) => {
+      const sz = w * (1 - 0.25 * i);
+      add(new THREE.BoxGeometry(sz, s, sz), M(c, { roughness: 0.9 }), 0, s * (i + 0.5), 0);
+    });
+    hx = hz = w / 2;
+  } else if (kind === 'sign') {                      // 안내 입간판(A자형). w: 폭, h: 높이
+    const tilt = 0.2, bz = h * Math.sin(tilt), frame = M(0x3a2a1c, { roughness: 0.6 });
+    [[1, bz], [-1, -bz]].forEach(([k, z]) => {
+      const pivot = new THREE.Group();  pivot.position.set(0, 0, z);  pivot.rotation.x = -k * tilt;  g.add(pivot);
+      const board = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.03), frame);  board.position.y = h / 2;  pivot.add(board);
+      if (k === 1) {                                 // 앞면에만 안내 그림
+        const face = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, h * 0.9), new THREE.MeshStandardMaterial({ map: signTexture(), roughness: 0.8 }));
+        face.position.set(0, h / 2, 0.0165);  pivot.add(face);
+      }
+    });
+    hx = w / 2;  hz = bz + 0.05;
+  } else if (kind === 'kiosk') {                     // 디지털 안내기. w: 화면 폭, h: 전체 높이
+    const sh = Math.min(w * 0.6, h * 0.4), metal = M(0x2b2b2e, { metalness: 0.5, roughness: 0.4 });
+    add(new THREE.BoxGeometry(Math.max(w * 0.5, 0.3), 0.04, 0.4), metal, 0, 0.02, 0);                   // 받침
+    add(new THREE.BoxGeometry(0.08, h - sh / 2, 0.08), metal, 0, (h - sh / 2) / 2, 0);                  // 기둥
+    const pivot = new THREE.Group();  pivot.position.set(0, h - sh / 2, 0);  pivot.rotation.x = -0.2;  g.add(pivot);   // 뒤로 살짝 기운 화면
+    pivot.add(new THREE.Mesh(new THREE.BoxGeometry(w, sh, 0.06), metal));
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.94, sh * 0.9), new THREE.MeshBasicMaterial({ map: paintingTexture() }));   // 화면(스스로 빛남)
+    scr.position.z = 0.031;  pivot.add(scr);
+    hx = Math.max(w / 2, 0.2);  hz = 0.25;
+  } else if (kind === 'cubes') {                     // 추상 큐브 조각. w: 아래 큐브 한 변, h: 전체 높이
+    const hs = [h * 0.4, h * 0.33, h * 0.27], ws = [w, w * 0.75, w * 0.5], cols = [M(0x222226, { metalness: 0.5, roughness: 0.3 }), M(0xb8892f, { metalness: 0.7, roughness: 0.3 }), M(0xc0392b, { roughness: 0.4 })];
+    let y = 0;
+    hs.forEach((hh, i) => { add(new THREE.BoxGeometry(ws[i], hh, ws[i]), cols[i], 0, y + hh / 2, 0).rotation.y = i * 0.5;  y += hh; });   // 조금씩 비틀어 쌓음
+    hx = hz = w * 0.72;
+  } else if (kind === 'piano') {                     // 그랜드 피아노(+의자). w: 길이, h: 깊이 (앞쪽 +z에 건반)
+    const black = M(0x0c0c0e, { roughness: 0.15, metalness: 0.3 });
+    [[-1, 1], [1, 1], [0, -1]].forEach(([kx, kz]) => add(new THREE.CylinderGeometry(0.04, 0.03, 0.72, 12), black, kx * (w / 2 - 0.12), 0.36, kz * (h / 2 - 0.12)));   // 다리
+    add(new THREE.BoxGeometry(w, 0.24, h), black, 0, 0.84, 0);                                          // 몸통
+    add(new THREE.BoxGeometry(w * 0.98, 0.03, h * 0.98), black, 0, 0.975, 0);                           // 뚜껑
+    const kw = w * 0.7, N = Math.floor(kw / 0.05), kz0 = h / 2 + 0.12;
+    add(new THREE.BoxGeometry(kw, 0.03, 0.25), M(0xf3f0e6, { roughness: 0.5 }), 0, 0.76, kz0);          // 건반(흰색)
+    for (let i = 0; i < N - 1; i++) if ([0, 1, 3, 4, 5].includes(i % 7)) add(new THREE.BoxGeometry(0.025, 0.02, 0.14), black, -kw / 2 + (i + 1) * 0.05, 0.785, kz0 - 0.045);   // 검은 건반
+    const stool = M(0x6b1d28, { roughness: 0.9 });
+    add(new THREE.BoxGeometry(0.5, 0.06, 0.3), stool, 0, 0.5, h / 2 + 0.6);                             // 의자
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => add(new THREE.CylinderGeometry(0.015, 0.015, 0.47, 8), black, a * 0.2, 0.235, h / 2 + 0.6 + b * 0.1));   // 의자 다리
+    hx = w / 2 + 0.05;  hz = h / 2 + 0.8;
+  } else if (kind === 'plant') {                     // 'plant' w: 화분 지름, h: 전체 높이
+    const ph = h * 0.25, fr = Math.min(w * 0.7, (h - ph) * 0.35);
+    add(new THREE.CylinderGeometry(w * 0.5, w * 0.38, ph, 24), M(0x8b5e3c), 0, ph / 2, 0);            // 화분
+    add(new THREE.CylinderGeometry(w * 0.04, w * 0.05, h - ph - fr, 8), M(0x5a3b22), 0, ph + (h - ph - fr) / 2, 0);   // 줄기
+    [[0, 0, 0, 1], [0.7, -0.5, 0.2, 0.7], [-0.6, -0.6, -0.3, 0.75]].forEach(([dx, dy, dz, k]) =>   // 잎 덩어리 3개
+      add(new THREE.IcosahedronGeometry(fr * k, 1), M(0x2f7d46, { roughness: 0.85, flatShading: true }), dx * fr, h - fr + dy * fr * 0.5, dz * fr));
+    hx = hz = Math.max(w / 2, fr);
+  }
+  p.hx = hx;  p.hz = hz;  p.w = w;  p.h = h;
+}
+
+function createProp(kind, label, wCm, hCm, name) {
+  const w = clamp(wCm, 10, 600) / 100, h = clamp(hCm, 10, 400) / 100;     // 입력(cm) → m
+  const p = { group: new THREE.Group(), kind, label };
+  const g = p.group;
+  buildProp(p, w, h);
+  propNo[kind] = (propNo[kind] || 0) + 1;
+  p.name = (name || '').trim().slice(0, 20) || `${label} ${propNo[kind]}`;       // 이름을 비우면 '벤치 1' 처럼
+  p.title = `${p.name} (${Math.round(w * 100)}cm × ${Math.round(h * 100)}cm)`;
+  g.userData.prop = p;
+  const n = props.length;                            // 중앙 시점이면 앞쪽 2.5m, 그 외엔 방 가운데 근처에 생성
+  props.push(p);  scene.add(g);
+  placeProp(p, mode === 'center' ? walk.x - Math.sin(yaw) * 2.5 : ((n % 5) - 2) * 0.8, mode === 'center' ? walk.z - Math.cos(yaw) * 2.5 : 0);
+  selectProp(p);
+}
+
+function propHalf(p) {                               // 소품이 어떤 각도로 돌아가 있어도 바닥에서 차지하는 절반 크기
+  const c = Math.abs(Math.cos(p.group.rotation.y)), s = Math.abs(Math.sin(p.group.rotation.y));
+  return [c * p.hx + s * p.hz, s * p.hx + c * p.hz];
+}
+function placeProp(p, x, z) {                        // 바닥 위 (x, z)에 놓기. 방 밖으로는 못 나가게 제한
+  const [hx, hz] = propHalf(p);                      // 돌린 각도에 맞는 가로·세로 절반 크기
+  const lx = Math.max(0, roomW / 2 - hx - 0.05), lz = Math.max(0, roomD / 2 - hz - 0.05);
+  p.group.position.set(clamp(x, -lx, lx), 0, clamp(z, -lz, lz));
+}
+
+function glow(g, hex) { g.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(hex); }); }
+
+function selectProp(p) {
+  if (selProp) glow(selProp.group, 0x000000);
+  selProp = p || null;
+  if (selProp) { glow(selProp.group, 0x4a3818); if (selFrame) selectFrame(null); }   // 액자와 소품은 동시에 선택되지 않음
+  updatePanel();
+}
+
+function updatePanel() {                             // 우측 '선택한 오브젝트' 패널 (액자 / 바닥 소품 공용)
+  const o = selFrame || selProp;
+  if (editing && editing !== o) closeObj();          // 다른 오브젝트를 고르면 수정창 닫기
+  $('framePanel').hidden = !o;
+  $('frameName').textContent = o ? o.title : '';
+}
+
+function removeProp(p) {
+  p.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+  scene.remove(p.group);
+  props.splice(props.indexOf(p), 1);
+  if (selProp === p) selectProp(null);
+}
+
+/* ---------- 방 갱신: dims(벽별 크기) → 3D 반영 ----------
+ * 방 전체 크기는 가장 긴 벽에 맞추고, 더 작은 벽은 가운데에 놓인 '전시 벽면'으로 표시됩니다.
+ * (남는 부분은 짙은 바탕 벽이 채워서 방이 항상 닫혀 있어요) */
+function updateRoom() {
+  const W = Math.max(dims[0].w, dims[2].w);          // 방 가로(X): 북/남 벽 중 긴 쪽
+  const D = Math.max(dims[1].w, dims[3].w);          // 방 깊이(Z): 동/서 벽 중 긴 쪽
+  const H = Math.max(...dims.map(d => d.h));         // 천장 높이: 가장 높은 벽
+  roomW = W; roomD = D; roomH = H;
+  const layout = [[0, -D / 2, W], [W / 2, 0, D], [0, D / 2, W], [-W / 2, 0, D]];  // 북, 동, 남, 서: [x, z, 바탕 벽 길이]
+  walls.forEach((w, i) => {
+    const d = dims[i], fy = Math.min(FRAME_Y, d.h * 0.55);   // 낮은 벽이면 액자도 낮춤
+    w.group.position.set(layout[i][0], 0, layout[i][1]);
+    w.shell.scale.set(layout[i][2], H, 1);  w.shell.position.y = H / 2;
+    w.wall.scale.set(d.w, d.h, 1);          w.wall.position.y = d.h / 2;
+    w.frame.position.y = fy;
+    w.spot.position.y = H - 0.2;  w.spot.target.position.set(0, fy, 0);
+    fitWallpaper(w);                                 // 벽지도 벽 크기에 맞춰 다시 배치
+    layoutDeco(w);                                   // 기본 벽 장식도 벽 크기에 맞춰 다시 배치
+    fitFrame(w, w.aspect);                           // 벽 크기에 맞춰 액자도 다시 맞춤
+  });
+  frames.forEach(f => { fitFrame(f, f.aspect); placeFrame(f, f.i, f.group.position.x, f.group.position.y); });   // 액자도 벽 안에 다시 맞춤
+  props.forEach(p => placeProp(p, p.group.position.x, p.group.position.z));                                      // 소품도 방 안에 다시 맞춤
+  floor.scale.set(W, D, 1);
+  layoutCeiling(W, D, H);                            // 천장(보·패널·장식)도 방 크기에 맞춰 다시 배치
+  floorTex.repeat.set(W / floorSize, D / floorSize);   // 방이 커져도 무늬 크기는 항상 일정하게
+  ceilingLight.position.set(0, H - 0.5, 0);
+}
+updateRoom();
+
+/* ---------- 버튼 C: 벽별 크기 조절 UI ----------
+ * 슬라이더는 '선택된 벽' 하나의 dims[i]만 바꾸므로 다른 벽에는 영향이 없습니다. */
+const $ = id => document.getElementById(id);
+const sliderW = $('sliderW'), sliderH = $('sliderH');   // 슬라이더
+const numW = $('numW'), numH = $('numH');               // 숫자 입력칸 (클릭해서 직접 입력)
+
+/* 상하연동: 맞은편 벽(북↔남, 동↔서)의 가로 길이를 함께 바꾸는 켜기/끄기 체크칸.
+ * link[0]: 북·남 / link[1]: 동·서 (벽 번호 % 2). 지금 선택한 벽이 속한 쌍의 상태를 체크칸이 보여줍니다. */
+const link = [false, false];
+try { const l = JSON.parse(localStorage.getItem('galleryLink')); if (Array.isArray(l)) { link[0] = !!l[0]; link[1] = !!l[1]; } } catch (e) {}
+const saveLink = () => { try { localStorage.setItem('galleryLink', JSON.stringify(link)); } catch (e) {} };
+const saveDims = () => { try { localStorage.setItem('galleryDims2', JSON.stringify(dims)); } catch (e) {} };
+function selectWall(i) {                             // 탭 선택 → 슬라이더를 그 벽의 현재 값으로 맞춤
+  selWall = i;
+  $('linkChk').checked = link[i % 2];
+  $('linkChk').setAttribute('aria-label', (i % 2 ? '동·서' : '북·남') + ' 상하연동');
+  $('linkLab').title = (i % 2 ? '동쪽과 서쪽' : '북쪽과 남쪽') + ' 벽의 가로 길이를 함께 바꿔요';
+  sliderW.value = Math.round(dims[i].w * 100);  sliderH.value = Math.round(dims[i].h * 100);   // m → cm
+  numW.value = Math.round(dims[i].w * 100);  numH.value = Math.round(dims[i].h * 100);
+  [...$('wallTabs').children].forEach((b, k) => b.classList.toggle('on', k === i));
+}
+let selWall = 0;                                     // 크기 조절 대상 벽 번호
+WALLS.forEach((info, i) => {                         // 북/동/남/서 탭 버튼 생성
+  const b = document.createElement('button');
+  b.textContent = info.name.replace(' 벽', '');
+  b.onclick = () => selectWall(i);
+  $('wallTabs').appendChild(b);
+});
+/* 슬라이더와 숫자 입력칸이 함께 쓰는 값 변경 함수
+ * key: 'w'(가로) 또는 'h'(세로), min~max: 허용 범위. 선택된 벽 하나만 바뀌고 저장됩니다. */
+function setDim(key, v, min, max) {
+  if (!isFinite(v)) { selectWall(selWall); return; }   // 숫자가 아니면 원래 값으로 되돌림
+  const val = clamp(Math.round(v), min, max) / 100;       // 입력(cm)을 정수로 보정(1~10000) 후 m로 변환해 저장
+  if (key === 'h') dims.forEach(d => d.h = val);          // 세로(높이)는 동·서·남·북 모두 연동
+  else {                                                  // 가로는 선택한 벽만 변경 (상하연동이 켜져 있으면 맞은편 벽도 같이)
+    dims[selWall][key] = val;
+    if (link[selWall % 2]) dims[(selWall + 2) % 4][key] = val;
+  }
+  updateRoom();  selectWall(selWall);                 // 3D 반영 + 슬라이더/숫자칸 동기화
+  saveDims();
+}
+$('linkChk').addEventListener('change', () => {      // 상하연동 켜기/끄기: 켜는 순간 맞은편 벽을 지금 벽의 가로 길이에 맞춤
+  link[selWall % 2] = $('linkChk').checked;
+  saveLink();
+  if (link[selWall % 2]) { dims[(selWall + 2) % 4].w = dims[selWall].w;  updateRoom();  saveDims(); }
+  selectWall(selWall);
+});
+sliderW.addEventListener('input', () => setDim('w', +sliderW.value, 1, 10000));   // 슬라이더 드래그
+sliderH.addEventListener('input', () => setDim('h', +sliderH.value, 1, 4000));
+// 숫자 칸: 입력을 마치면(Enter / 다른 곳 클릭 / 화살표 클릭) 적용. 타이핑 도중에는 건드리지 않음
+numW.addEventListener('change', () => setDim('w', parseFloat(numW.value), 1, 10000));
+numH.addEventListener('change', () => setDim('h', parseFloat(numH.value), 1, 4000));
+[numW, numH].forEach(n => n.addEventListener('keydown', e => { if (e.key === 'Enter') n.blur(); }));
+$('sizeBtn').addEventListener('click', () => {       // 버튼 C: 슬라이더 패널 열기/닫기
+  $('sizePanel').hidden = !$('sizePanel').hidden;
+  $('sizeBtn').classList.toggle('on', !$('sizePanel').hidden);
+});
+selectWall(0);
+$('imgBtn').addEventListener('click', () => {         // 버튼 D: 이미지 선택 패널 열기/닫기
+  $('uploads').hidden = !$('uploads').hidden;
+  $('imgBtn').classList.toggle('on', !$('uploads').hidden);
+});
+
+/* ---------- 버튼 D: 액자이미지 / 벽이미지 ---------- */
+const NAMES = WALLS.map(w => w.name.replace(' 벽', ''));   // 북쪽·동쪽·남쪽·서쪽
+const ORDER = [1, 3, 2, 0];                                // 화면에 보여줄 순서: 동·서·남·북
+
+// 파일 선택 버튼(label + 숨긴 input) 생성. 파일을 고르면 임시 URL을 onPick에 넘겨줌
+function makeUpload(title, defaultText, onPick) {
+  const label = document.createElement('label');
+  label.className = 'up';
+  label.innerHTML = `<input type="file" accept="image/*"><b>${title}</b><span>${defaultText}</span>`;
+  const input = label.querySelector('input'), span = label.querySelector('span');
+  input.addEventListener('change', () => {
+    const f = input.files[0];
+    if (!f) return;
+    onPick(URL.createObjectURL(f));                  // 새로고침 없이 즉시 교체
+    span.textContent = f.name;
+    input.value = '';                                // 같은 파일을 다시 골라도 반응하도록 초기화
+  });
+  return { label, span };
+}
+
+/* (2) 벽이미지: 벽지 텍스처 교체 (내 파일 선택) */
+const wpBlobs = [], wpStatus = [];
+
+// 벽지를 벽 비율에 맞춰 '꽉 채우기(cover)': 이미지가 늘어나지 않고 넘치는 부분만 잘림
+function layoutDeco(w) {                             // 기본 벽 장식을 벽 크기에 맞춰 배치 (패널 높이는 최대 1m)
+  const d = dims[w.i], k = w.deco.parts;
+  const wh = Math.min(1.0, d.h * 0.28), bb = Math.min(0.12, wh * 0.18), rl = Math.min(0.06, wh * 0.1), ch = Math.min(0.18, d.h * 0.06);
+  k.wains.scale.set(d.w, wh, 1);              k.wains.position.set(0, wh / 2, 0.003);
+  w.deco.wainTex.repeat.set(Math.max(0.05, d.w / 0.8), 1);          // 패널 한 칸 약 80cm
+  k.base.scale.set(d.w, bb, 0.025);           k.base.position.set(0, bb / 2, 0.0155);
+  k.rail.scale.set(d.w, rl, 0.025);           k.rail.position.set(0, wh, 0.0155);
+  k.crown.scale.set(d.w, ch, 0.05);           k.crown.position.set(0, d.h - ch / 2, 0.028);
+  k.fillet.scale.set(d.w, ch * 0.18, 0.03);   k.fillet.position.set(0, d.h - ch - ch * 0.09, 0.018);
+}
+function fitWallpaper(w) {
+  const tex = w.wall.material.map;
+  if (!tex) return;
+  if (!w.hasWp) { const d = dims[w.i], t = WALL_STYLES[curWall].tile;  tex.repeat.set(d.w / t, d.h / t);  tex.offset.set(0, 0);  return; }   // 벽 스타일 무늬: 벽 크기에 맞춰 반복(한 칸 크기는 스타일마다 다름)
+  const A = dims[w.i].w / dims[w.i].h, I = w.wpAspect;       // A: 벽 비율, I: 이미지 비율
+  if (I > A) { tex.repeat.set(A / I, 1); tex.offset.set((1 - A / I) / 2, 0); }
+  else       { tex.repeat.set(1, I / A); tex.offset.set(0, (1 - I / A) / 2); }
+}
+
+function applyWallStyle(w) {                        // 이 벽에 지금 벽 스타일(무늬·패널·몰딩 색)을 입힘 — 내 이미지가 없을 때 보이는 모습
+  const st = WALL_STYLES[curWall], m = w.wall.material, k = w.deco.parts;
+  if (!st.cvTop) st.cvTop = st.top();                // 캔버스는 스타일마다 한 번만 그리고, 텍스처만 벽마다 따로 만듦
+  if (m.map) m.map.dispose();
+  m.map = repeatTex(st.cvTop);  m.color.set(0xffffff);  m.roughness = st.rough;  m.needsUpdate = true;
+  w.shell.material.color.setHex(st.shell);
+  if (st.wains) {
+    if (!st.cvWains) st.cvWains = st.wains();
+    const t = repeatTex(st.cvWains);
+    if (w.deco.wainTex) w.deco.wainTex.dispose();
+    w.deco.wainTex = t;  k.wains.material.map = t;  k.wains.material.needsUpdate = true;
+  }
+  k.wains.visible = k.rail.visible = !!st.wains;     // 패널이 없는 스타일은 패널·의자 레일도 숨김
+  k.base.material.color.setHex(st.base);  k.rail.material.color.setHex(st.rail);
+  k.crown.material.color.setHex(st.crown);  k.fillet.material.color.setHex(st.fillet);
+  w.hasWp = false;  w.deco.group.visible = true;
+  fitWallpaper(w);  layoutDeco(w);
+}
+function setWallStyle(i) {                           // 벽 스타일 바꾸기: 4면 모두 적용 (내가 고른 벽 이미지는 지워짐)
+  curWall = i;
+  walls.forEach(w => resetWallpaper(w.i));
+  WALL_STYLES.forEach((o, k) => o.btn && o.btn.classList.toggle('on', k === i));
+}
+function loadWallpaper(i, url, onDone) {             // onDone(성공 여부)
+  const w = walls[i];
+  w.wpSrc = url;                                     // 세이브할 때 쓰기 위해 출처 기억
+  loader.load(url, tex => {
+    tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = maxAniso;
+    const m = w.wall.material;
+    if (m.map) m.map.dispose();
+    m.map = tex;  m.color.set(0xffffff);             // 색을 흰색으로 해야 벽지 원래 색이 보임
+    m.needsUpdate = true;
+    w.wpAspect = tex.image.width / tex.image.height;
+    w.hasWp = true;  w.deco.group.visible = false;   // 벽 이미지가 들어오면 기본 장식(무늬·패널·몰딩)은 숨김
+    fitWallpaper(w);
+    if (url.startsWith('blob:')) {                   // 업로드 파일이면 이전 임시 URL 정리
+      if (wpBlobs[i]) URL.revokeObjectURL(wpBlobs[i]);
+      wpBlobs[i] = url;
+    }
+    if (onDone) onDone(true);
+  }, undefined, () => { if (onDone) onDone(false); });
+}
+
+WALL_STYLES.forEach((st, i) => {                    // '벽' 탭 맨 위: 벽 스타일 버튼 (누르면 4면이 바로 바뀜)
+  const b = document.createElement('button');
+  b.className = 'fbtn';  b.innerHTML = `<i style="background:${st.swatch}"></i>${st.name}`;
+  b.onclick = () => setWallStyle(i);
+  st.btn = b;  $('wallList').appendChild(b);
+});
+WALL_STYLES[curWall].btn.classList.add('on');
+ORDER.forEach(i => {                                 // 벽마다 [파일 선택] 한 줄
+  const row = document.createElement('div');
+  row.className = 'wrow';
+  const up = makeUpload(NAMES[i] + ' 벽지', '기본 벽지', url => loadWallpaper(i, url));
+  wpStatus[i] = up.span;
+  row.append(up.label);
+  $('wallList').appendChild(row);
+});
+
+/* (3) 탭 4개(벽 · 액자 · 바닥 · 천장): 누르면 해당 목록이 펼쳐지고, 같은 탭을 다시 누르면 접힘 ('액자이미지'는 액자가 있을 때만 보임) */
+const TABS = { wall: ['tabWall', 'wallList'], frame: ['tabFrame', 'frameList'], floor: ['tabFloor', 'floorList'], ceil: ['tabCeil', 'ceilList'] };
+function showTab(name) {
+  const cur = Object.keys(TABS).find(k => $(TABS[k][0]).classList.contains('on')) || '';
+  const next = cur === name ? '' : name;
+  for (const k in TABS) { $(TABS[k][0]).classList.toggle('on', next === k); $(TABS[k][1]).hidden = next !== k; }
+}
+Object.keys(TABS).forEach(k => { $(TABS[k][0]).onclick = () => showTab(k); });
+
+FLOORS.forEach((f, i) => {                       // '바닥' 탭: 재질마다 버튼 하나 (누르면 바로 바닥이 바뀜)
+  const b = document.createElement('button');
+  b.className = 'fbtn';  b.innerHTML = `<i style="background:${f.swatch}"></i>${f.name}`;
+  b.onclick = () => setFloor(i);
+  f.btn = b;  $('floorList').appendChild(b);
+});
+setFloor(curFloor);                              // 현재 재질 버튼에 선택 표시
+CEILINGS.forEach((c, i) => {                      // '천장' 탭: 종류마다 버튼 하나 (누르면 바로 천장이 바뀜)
+  const b = document.createElement('button');
+  b.className = 'fbtn';  b.innerHTML = `<i style="background:${c.swatch}"></i>${c.name}`;
+  b.onclick = () => setCeiling(i);
+  c.btn = b;  $('ceilList').appendChild(b);
+});
+setCeiling(curCeil);                             // 현재 천장 버튼에 선택 표시
+function refreshFrameTab() {
+  const has = frames.some(f => f.kind !== 'door' && !f.item);   // 문은 그림이 없으므로 제외
+  $('tabFrame').hidden = !has;
+  if (!has && !$('frameList').hidden) showTab('frame');   // 액자가 없어지면 열려 있던 목록도 접음
+}
+
+/* ---------- 카메라 컨트롤 (중앙 시점에서만 드래그로 둘러보기) ---------- */
+let yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0;  // yaw: 좌우, pitch: 상하 회전각
+let dragFrame = null, dragProp = null;  const grab = { x: 0, y: 0 };               // 끌고 있는 액자 / 잡은 지점과 액자 중심의 차이
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+const aim = e => { ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); };
+const wallOk = i => walls[i].group.visible && alphas[i] > 0.5;     // 보이는(투명해지지 않은) 벽만 대상
+canvas.addEventListener('pointerdown', e => {
+  lastX = e.clientX; lastY = e.clientY;
+  canvas.setPointerCapture(e.pointerId);
+  aim(e);
+  const fh = ray.intersectObjects(frames.filter(f => wallOk(f.i)).map(f => f.group), true)[0];
+  const ph = mode === 'wall' ? null : ray.intersectObjects(props.map(p => p.group), true)[0];
+  const wh = ray.intersectObjects(walls.filter((w, i) => wallOk(i)).map(w => w.wall))[0];   // 벽이 가리는지 확인
+  const owner = (h, key) => { let o = h && h.object; while (o && !o.userData[key]) o = o.parent; return o && o.userData[key]; };
+  const fr = owner(fh, 'frame'), pr = owner(ph, 'prop');
+  const useProp = pr && (!fr || ph.distance < fh.distance);          // 겹치면 더 가까운 쪽
+  const hit = useProp ? ph : fh;
+  if ((fr || pr) && (!wh || hit.distance < wh.distance)) {
+    if (useProp) {                                   // 바닥 소품을 눌렀으면 끌기 시작
+      dragProp = pr;  selectProp(pr);
+      grab.x = pr.group.position.x - ph.point.x;  grab.y = pr.group.position.z - ph.point.z;
+    } else {                                         // 액자를 눌렀으면 액자 끌기 시작
+      dragFrame = fr;  selectFrame(fr);
+      const p = walls[fr.i].group.worldToLocal(fh.point.clone());
+      grab.x = fr.group.position.x - p.x;  grab.y = fr.group.position.y - p.y;
+    }
+  } else { selectFrame(null); selectProp(null); dragging = true; }     // 아니면 기존처럼 둘러보기
+});
+canvas.addEventListener('pointermove', e => {
+  if (dragProp) {                                    // 바닥 위로 끌어 옮기기
+    aim(e);
+    const h = ray.intersectObject(floor)[0];
+    if (h) placeProp(dragProp, h.point.x + grab.x, h.point.z + grab.y);
+    return;
+  }
+  if (dragFrame) {                                   // 마우스가 가리키는 벽 위치로 이동 (다른 벽으로도 옮겨짐)
+    aim(e);
+    const h = ray.intersectObjects(walls.filter((w, i) => wallOk(i)).map(w => w.wall))[0];
+    if (h) {
+      const wi = walls.findIndex(w => w.wall === h.object), p = walls[wi].group.worldToLocal(h.point.clone());
+      const same = wi === dragFrame.i;
+      placeFrame(dragFrame, wi, p.x + (same ? grab.x : 0), p.y + (same ? grab.y : 0));
+    }
+    return;
+  }
+  if (!dragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  if (mode === 'center') { yaw += dx * 0.005; pitch = clamp(pitch + dy * 0.005, -1.2, 1.2); }
+  else if (mode === 'top') { orbit.yaw -= dx * 0.005; orbit.pitch = clamp(orbit.pitch + dy * 0.005, 0.12, 1.5); }   // 3D: 끌면 방 둘레를 돌며 봄
+  else if (mode === 'wall') { view2D.px -= dx * view2D.wpp; view2D.py += dy * view2D.wpp; }                        // 2D: 끄는 방향으로 벽면이 따라 움직임
+});
+['pointerup', 'pointercancel'].forEach(ev => canvas.addEventListener(ev, () => { dragging = false; dragFrame = dragProp = null; }));
+
+/* ---------- 2D오브젝트: 벽에 붙는 오브젝트 10종 (2D 벽면 보기에서만 메뉴에 나타남) ----------
+ * 액자·문과 똑같이 '벽 그룹의 자식'이라 끌어서 옮기고(다른 벽으로도), 수정·삭제할 수 있어요.
+ * 각 항목: label 이름 / labels 크기칸 이름 / def 기본 크기(cm) / min·max 허용 크기(cm) / cy 기본 높이(m) / round 원형(가로=세로)
+ *          build({g, w, h, M, add}) → 도형으로 모양을 만듦 (벽 표면이 z=0, 바깥쪽이 +z, 중심이 (0,0), 크기 w×h는 m 단위)
+ * ★ 각 build에서 가장 먼저 만든 재질 M(...)이 '선택했을 때 빛나는 재질'이 됩니다. */
+const cvTex = (cw, ch, draw) => {                    // 캔버스에 그림을 그려 텍스처로 만들기
+  const c = document.createElement('canvas');  c.width = cw;  c.height = ch;
+  draw(c.getContext('2d'), cw, ch);
+  const t = new THREE.CanvasTexture(c);  t.encoding = THREE.sRGBEncoding;  t.anisotropy = maxAniso;
+  return t;
+};
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const WALL_ITEMS = {
+  clock: { label: '벽시계', labels: ['지름', '지름'], def: [60, 60], min: [20, 20], max: [200, 200], cy: 3.3, round: true,
+    build({ g, w, M, add }) {
+      const r = w / 2, wood = M(0x3a2a1c, { roughness: 0.5 });
+      add(new THREE.CylinderGeometry(r, r, 0.05, 48), wood, 0, 0, 0.025).rotation.x = Math.PI / 2;   // 둥근 테두리
+      const face = cvTex(512, 512, (c, W) => {                       // 시계판: 눈금 + 숫자
+        c.fillStyle = '#f5f0e1';  c.fillRect(0, 0, W, W);  c.translate(W / 2, W / 2);  c.strokeStyle = '#222';
+        for (let i = 0; i < 60; i++) {
+          const a = i * Math.PI / 30, big = i % 5 === 0, r0 = big ? 190 : 210;
+          c.lineWidth = big ? 8 : 3;  c.beginPath();
+          c.moveTo(Math.sin(a) * r0, -Math.cos(a) * r0);  c.lineTo(Math.sin(a) * 236, -Math.cos(a) * 236);  c.stroke();
+        }
+        c.fillStyle = '#222';  c.font = 'bold 56px Georgia, serif';  c.textAlign = 'center';  c.textBaseline = 'middle';
+        for (let n = 1; n <= 12; n++) c.fillText(n, Math.sin(n * Math.PI / 6) * 150, -Math.cos(n * Math.PI / 6) * 150);
+      });
+      add(new THREE.CircleGeometry(r * 0.9, 48), new THREE.MeshStandardMaterial({ map: face, roughness: 0.6 }), 0, 0, 0.052);
+      const t = new Date(), mA = t.getMinutes() * Math.PI / 30, hA = ((t.getHours() % 12) + t.getMinutes() / 60) * Math.PI / 6;   // 만든 시각의 시침·분침
+      [[r * 0.5, Math.max(0.008, r * 0.07), hA], [r * 0.75, Math.max(0.005, r * 0.04), mA]].forEach(([len, th, a]) => {
+        const pv = new THREE.Group();  pv.position.z = 0.056;  pv.rotation.z = -a;  g.add(pv);
+        const hand = new THREE.Mesh(new THREE.BoxGeometry(th, len, 0.004), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        hand.position.y = len * 0.4;  pv.add(hand);
+      });
+      add(new THREE.SphereGeometry(Math.max(0.012, r * 0.06), 16, 12), M(0xd4af37, { metalness: 0.8, roughness: 0.3 }), 0, 0, 0.06);
+    } },
+
+  mirror: { label: '거울', labels: ['가로 길이', '세로 길이'], def: [70, 120], min: [20, 20], max: [300, 300], cy: 1.9,
+    build({ w, h, M, add }) {
+      const gold = M(0xb8892f, { metalness: 0.7, roughness: 0.3 }), t = clamp(Math.min(w, h) * 0.07, 0.025, 0.09);
+      add(new THREE.BoxGeometry(w, t, 0.05), gold, 0, (h - t) / 2, 0.025);   add(new THREE.BoxGeometry(w, t, 0.05), gold, 0, -(h - t) / 2, 0.025);
+      add(new THREE.BoxGeometry(t, h - 2 * t, 0.05), gold, -(w - t) / 2, 0, 0.025);   add(new THREE.BoxGeometry(t, h - 2 * t, 0.05), gold, (w - t) / 2, 0, 0.025);
+      const glass = cvTex(256, 256, (c, W) => {                      // 유리: 푸른 그라데이션 + 비스듬한 빛줄기
+        const gr = c.createLinearGradient(0, 0, W, W);  gr.addColorStop(0, '#d3e3ec');  gr.addColorStop(0.5, '#8fa9b8');  gr.addColorStop(1, '#c6d8e2');
+        c.fillStyle = gr;  c.fillRect(0, 0, W, W);  c.fillStyle = 'rgba(255,255,255,.35)';
+        c.beginPath();  c.moveTo(W * 0.15, 0);  c.lineTo(W * 0.4, 0);  c.lineTo(W * 0.05, W);  c.lineTo(0, W);  c.lineTo(0, W * 0.6);  c.fill();
+        c.beginPath();  c.moveTo(W * 0.6, 0);  c.lineTo(W * 0.72, 0);  c.lineTo(W * 0.3, W);  c.lineTo(W * 0.18, W);  c.fill();
+      });
+      add(new THREE.PlaneGeometry(w - 2 * t, h - 2 * t), new THREE.MeshStandardMaterial({ map: glass, roughness: 0.05, metalness: 0.3 }), 0, 0, 0.02);
+    } },
+
+  shelf: { label: '벽 선반', labels: ['선반 길이', '전체 높이'], def: [120, 40], min: [30, 25], max: [400, 150], cy: 1.8,
+    build({ w, h, M, add }) {
+      const wood = M(0x5a3a24, { roughness: 0.6 }), by = -h / 2 + 0.13;
+      add(new THREE.BoxGeometry(w, 0.04, 0.22), wood, 0, by, 0.11);                                    // 선반 판
+      [-1, 1].forEach(k => add(new THREE.BoxGeometry(0.03, 0.12, 0.2), wood, k * w * 0.38, -h / 2 + 0.06, 0.1));   // 받침 브래킷
+      const top = by + 0.02, avail = Math.max(0.04, h - 0.15 - 0.02), cols = [0x8c2f2f, 0x2f4d6b, 0x3e6b45, 0xb8892f, 0x5b3b6b];
+      let x = -w / 2 + 0.07;                                                                          // 책 몇 권
+      for (let i = 0; i < 6 && x < -w * 0.05; i++) {
+        const th = 0.035 + Math.random() * 0.025, bh = avail * (0.55 + Math.random() * 0.4);
+        add(new THREE.BoxGeometry(th, bh, 0.15), M(pick(cols), { roughness: 0.8 }), x, top + bh / 2, 0.11);  x += th + 0.004;
+      }
+      const vh = avail * 0.75, vr = Math.min(0.06, w * 0.05);                                          // 꽃병
+      add(new THREE.CylinderGeometry(vr * 0.7, vr, vh, 20), M(0xe9e5da, { roughness: 0.3 }), w * 0.2, top + vh / 2, 0.11);
+      add(new THREE.SphereGeometry(Math.min(0.05, avail * 0.3), 16, 12), M(0xb8892f, { metalness: 0.7, roughness: 0.3 }), w * 0.38, top + Math.min(0.05, avail * 0.3), 0.11);   // 황동 구
+    } },
+
+  poster: { label: '포스터', labels: ['가로 길이', '세로 길이'], def: [60, 90], min: [15, 15], max: [300, 400], cy: 2.2,
+    build({ w, h, M, add }) {
+      const bar = M(0x1a1a1a, { roughness: 0.5 });
+      const tex = cvTex(400, clamp(Math.round(400 * h / w), 100, 900), (c, W, H) => {   // 즉석에서 그린 추상 포스터
+        const hue = Math.random() * 360;
+        c.fillStyle = `hsl(${hue}, 30%, 92%)`;  c.fillRect(0, 0, W, H);
+        c.fillStyle = `hsl(${hue}, 70%, 50%)`;  c.beginPath();  c.arc(W * 0.5, H * 0.4, W * 0.3, 0, Math.PI * 2);  c.fill();
+        c.fillStyle = `hsl(${(hue + 180) % 360}, 60%, 35%)`;  c.fillRect(W * 0.1, H * 0.72, W * 0.8, H * 0.035);
+        c.fillStyle = '#333';  c.fillRect(W * 0.1, H * 0.8, W * 0.55, H * 0.02);  c.fillRect(W * 0.1, H * 0.85, W * 0.4, H * 0.015);
+        c.strokeStyle = `hsl(${hue}, 40%, 30%)`;  c.lineWidth = 6;  c.strokeRect(W * 0.04, H * 0.03, W * 0.92, H * 0.94);
+      });
+      add(new THREE.PlaneGeometry(w, h - 0.03), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 }), 0, 0, 0.004);
+      [-1, 1].forEach(k => add(new THREE.BoxGeometry(w + 0.01, 0.015, 0.012), bar, 0, k * (h - 0.015) / 2, 0.006));   // 위·아래 걸이 막대
+    } },
+
+  tapestry: { label: '태피스트리', labels: ['가로 길이', '세로 길이'], def: [100, 180], min: [30, 40], max: [500, 400], cy: 2.6,
+    build({ w, h, M, add }) {
+      const rod = M(0x3a2a1c, { roughness: 0.5 });
+      add(new THREE.CylinderGeometry(0.015, 0.015, w, 12), rod, 0, h / 2 - 0.02, 0.03).rotation.z = Math.PI / 2;      // 위 막대
+      [-1, 1].forEach(k => add(new THREE.SphereGeometry(0.025, 12, 10), rod, k * w / 2, h / 2 - 0.02, 0.03));          // 막대 끝 장식
+      const cloth = cvTex(256, clamp(Math.round(256 * h / w), 64, 700), (c, W, H) => {                               // 띠 + 마름모 무늬
+        c.fillStyle = '#7a1f2b';  c.fillRect(0, 0, W, H);
+        const cols = ['#c99a3a', '#1f3a5a', '#d8c9a0'];
+        for (let y = 0; y < H; y += H / 8) { c.fillStyle = cols[Math.floor(y / (H / 8)) % 3];  c.fillRect(0, y, W, H / 40); }
+        for (let i = 0; i < 4; i++) {
+          const cx = W * (0.125 + i * 0.25), cy = H / 2, s = W * 0.1;
+          c.fillStyle = '#d8c9a0';  c.beginPath();  c.moveTo(cx, cy - s * 1.6);  c.lineTo(cx + s, cy);  c.lineTo(cx, cy + s * 1.6);  c.lineTo(cx - s, cy);  c.fill();
+          c.fillStyle = '#1f3a5a';  c.beginPath();  c.moveTo(cx, cy - s * 0.8);  c.lineTo(cx + s * 0.5, cy);  c.lineTo(cx, cy + s * 0.8);  c.lineTo(cx - s * 0.5, cy);  c.fill();
+        }
+        c.strokeStyle = '#c99a3a';  c.lineWidth = 8;  c.strokeRect(4, 4, W - 8, H - 8);
+      });
+      add(new THREE.PlaneGeometry(w * 0.96, h - 0.07), new THREE.MeshStandardMaterial({ map: cloth, roughness: 1 }), 0, -0.02, 0.012);
+      const N = Math.min(40, Math.max(4, Math.floor(w * 20))), tg = new THREE.BoxGeometry(0.012, 0.04, 0.004), tm = M(0xc99a3a, { roughness: 0.8 });   // 아래 술
+      for (let i = 0; i < N; i++) add(tg, tm, -w * 0.48 + (i + 0.5) * (w * 0.96 / N), -h / 2 + 0.02, 0.012);
+    } },
+
+  relief: { label: '대리석 부조', labels: ['가로 길이', '세로 길이'], def: [90, 90], min: [30, 30], max: [300, 300], cy: 2.4,
+    build({ w, h, M, add }) {
+      const tex = cvTex(256, 256, (c, W) => {                        // 대리석 결
+        c.fillStyle = '#ece9e4';  c.fillRect(0, 0, W, W);
+        for (let i = 0; i < 24; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '255,255,255' : '150,150,160'},${0.05 + rnd() * 0.1})`;  c.beginPath();  c.arc(rnd() * W, rnd() * W, 30 + rnd() * 70, 0, 6.3);  c.fill(); }
+        for (let v = 0; v < 4; v++) { let x = rnd() * W, y = rnd() * W, a = rnd() * 6.28;  c.strokeStyle = 'rgba(95,95,110,.25)';  c.lineWidth = 1 + rnd() * 2;  c.beginPath();  c.moveTo(x, y);
+          for (let k = 0; k < 20; k++) { a += (rnd() - 0.5) * 0.9;  x += Math.cos(a) * 14;  y += Math.sin(a) * 14;  c.lineTo(x, y); }  c.stroke(); }
+      });
+      const marble = M(0xffffff, { map: tex, roughness: 0.4 }), s = Math.min(w, h), R = s * 0.3;
+      add(new THREE.BoxGeometry(w, h, 0.04), marble, 0, 0, 0.02);                                     // 대리석 판
+      const stone = M(0xdcd7cc, { roughness: 0.5 });
+      add(new THREE.TorusGeometry(R, Math.max(0.01, s * 0.02), 12, 48), stone, 0, 0, 0.045);          // 도드라진 고리
+      const dome = add(new THREE.SphereGeometry(R * 0.55, 24, 16), stone, 0, 0, 0.04);   dome.scale.z = 0.3;   // 가운데 돌출 원
+      [-1, 1].forEach(k => add(new THREE.BoxGeometry(Math.max(0.02, s * 0.04), h * 0.75, 0.03), stone, k * w * 0.38, 0, 0.055));   // 양옆 기둥 문양
+    } },
+
+  exitsign: { label: '비상구 표지', labels: ['가로 길이', '세로 길이'], def: [60, 25], min: [20, 10], max: [150, 80], cy: 3.6,
+    build({ w, h, M, add }) {
+      const body = M(0x1b1b1b, { roughness: 0.5 });
+      add(new THREE.BoxGeometry(w, h, 0.06), body, 0, 0, 0.03);
+      const tex = cvTex(512, clamp(Math.round(512 * h * 0.8 / (w * 0.94)), 48, 512), (c, W, H) => {
+        c.fillStyle = '#0b8a43';  c.fillRect(0, 0, W, H);
+        c.fillStyle = '#fff';  c.font = `bold ${Math.min(H * 0.55, W * 0.11)}px sans-serif`;  c.textAlign = 'center';  c.textBaseline = 'middle';
+        c.fillText('비상구  EXIT  ➜', W / 2, H / 2);
+      });
+      add(new THREE.PlaneGeometry(w * 0.94, h * 0.8), new THREE.MeshBasicMaterial({ map: tex }), 0, 0, 0.061);   // 스스로 빛나는 표지판 면
+    } },
+
+  extinguisher: { label: '소화기함', labels: ['폭', '높이'], def: [35, 70], min: [20, 30], max: [80, 150], cy: 1.2,
+    build({ w, h, M, add }) {
+      const box = M(0xa8221b, { roughness: 0.5 });
+      add(new THREE.BoxGeometry(w, h, 0.14), box, 0, 0, 0.07);                                         // 빨간 함
+      const cr = Math.min(w * 0.17, h * 0.12), ch = h * 0.55;
+      add(new THREE.CylinderGeometry(cr, cr, ch, 20), M(0xd8342b, { roughness: 0.35, metalness: 0.2 }), 0, -h * 0.05, 0.06);   // 소화기 통
+      add(new THREE.CylinderGeometry(cr * 0.5, cr * 0.5, ch * 0.12, 12), M(0x111111), 0, -h * 0.05 + ch / 2 + ch * 0.06, 0.06);   // 손잡이 부분
+      const label = cvTex(256, 64, (c, W, H) => { c.fillStyle = '#fff';  c.font = 'bold 40px sans-serif';  c.textAlign = 'center';  c.textBaseline = 'middle';  c.fillText('소화기', W / 2, H / 2); });
+      add(new THREE.PlaneGeometry(w * 0.7, h * 0.1), new THREE.MeshBasicMaterial({ map: label, transparent: true }), 0, h * 0.4, 0.1415);   // 윗부분 글자
+      add(new THREE.PlaneGeometry(w * 0.76, h * 0.68), new THREE.MeshStandardMaterial({ color: 0xbfd8e8, transparent: true, opacity: 0.25, roughness: 0.1 }), 0, -h * 0.05, 0.1415);   // 유리창
+    } },
+
+  monitor: { label: '벽걸이 모니터', labels: ['가로 길이', '세로 길이'], def: [110, 65], min: [30, 20], max: [400, 250], cy: 2.0,
+    build({ w, h, M, add }) {
+      add(new THREE.BoxGeometry(w, h, 0.04), M(0x111114, { metalness: 0.5, roughness: 0.3 }), 0, 0, 0.02);   // 검은 테두리
+      add(new THREE.PlaneGeometry(w * 0.96, h * 0.94), new THREE.MeshBasicMaterial({ map: paintingTexture() }), 0, 0, 0.0405);   // 화면(스스로 빛남)
+    } },
+
+  sconce: { label: '벽 조명', labels: ['폭', '높이'], def: [25, 45], min: [10, 15], max: [80, 150], cy: 2.6,
+    build({ w, h, M, add }) {
+      const brass = M(0xb8892f, { metalness: 0.8, roughness: 0.3 });
+      add(new THREE.BoxGeometry(w * 0.3, h, 0.02), brass, 0, 0, 0.01);                                 // 벽에 붙는 판
+      add(new THREE.BoxGeometry(0.02, 0.02, 0.11), brass, 0, h * 0.2, 0.065);                          // 팔
+      add(new THREE.SphereGeometry(w * 0.12, 12, 10), brass, 0, -h * 0.35, 0.03);                      // 아래 장식 구
+      add(new THREE.CylinderGeometry(w * 0.3, w * 0.45, h * 0.55, 24, 1, true),
+        new THREE.MeshStandardMaterial({ color: 0xf4e7c5, emissive: 0x6b5a30, roughness: 0.9, side: THREE.DoubleSide }), 0, h * 0.2, 0.12);   // 불 켜진 갓
+      add(new THREE.SphereGeometry(w * 0.15, 12, 10), new THREE.MeshBasicMaterial({ color: 0xffe6b0 }), 0, h * 0.2, 0.12);   // 전구
+    } }
+};
+
+const itemNo = {};                                   // 종류별 이름 번호
+function clearGroup(g) {                             // 그룹 안의 도형을 모두 지우고 메모리 정리
+  while (g.children.length) {
+    const c = g.children[0];  g.remove(c);
+    c.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+  }
+}
+function buildItem(f) {                              // f.fw × f.fh 크기로 모양 만들기 (크기를 바꿀 때마다 다시 만듦)
+  clearGroup(f.group);
+  const mats = [], g = f.group;
+  const M = (c, o) => { const m = new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.6 }, o)); mats.push(m); return m; };
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x || 0, y || 0, z || 0); g.add(m); return m; };
+  WALL_ITEMS[f.kind].build({ g, w: f.fw, h: f.fh, M, add });
+  f.woodMat = mats[0];                               // 선택하면 이 재질이 빛남
+}
+function setItemSize(f, wCm, hCm) {                  // 크기 적용: 허용 범위와 벽 크기 안으로 맞춤
+  const s = WALL_ITEMS[f.kind], d = dims[f.i];
+  let w = clamp(wCm, s.min[0], s.max[0]) / 100, h = clamp(hCm, s.min[1], s.max[1]) / 100;
+  if (s.round) { w = Math.min(w, d.w * 0.95, d.h * 0.95);  h = w; }
+  else { w = Math.min(w, d.w * 0.95);  h = Math.min(h, d.h * 0.95); }
+  f.fw = w;  f.fh = h;  f.aspect = w / h;
+  buildItem(f);
+  f.title = `${f.name} (${Math.round(w * 100)}cm × ${Math.round(h * 100)}cm)`;
+}
+function createWallItem(key, wCm, hCm, name) {       // 2D오브젝트 만들기: 지금 보는 벽에 생성
+  const s = WALL_ITEMS[key], wi = facingWall(), d = dims[wi];
+  const f = { i: wi, item: true, kind: key, label: s.label, group: new THREE.Group(), aspect: 1, fw: 1, fh: 1 };
+  itemNo[key] = (itemNo[key] || 0) + 1;
+  f.name = (name || '').trim().slice(0, 20) || `${s.label} ${itemNo[key]}`;
+  setItemSize(f, wCm, hCm);
+  f.group.userData.frame = f;                        // 액자와 같은 방식으로 선택·끌기·삭제됨
+  const n = frames.filter(o => o.i === wi).length;
+  frames.push(f);
+  placeFrame(f, wi, ((n % 5) - 2) * 0.5, Math.min(s.cy, d.h * 0.8));
+  selectFrame(f);
+}
+
+/* ---------- 우측 상단 '오브젝트' 버튼 ----------
+ * 새 오브젝트는 OBJECTS 배열에 한 줄만 추가하면 메뉴에 나타납니다. (id: 오브젝트 번호, name: 메뉴에 보이는 이름) */
+const bump = k => (propNo[k] || 0) + 1;
+const OBJECTS = [   // id: 오브젝트 번호 / labels: 크기칸 이름 / def: 기본 크기(cm) / next: 기본 이름에 붙는 번호 / create(가로cm, 세로cm, 이름)
+  { id: '오브젝트1', name: '액자',        labels: ['가로 길이', '세로 길이'],   def: [120, 80],  next: () => frameSeq + 1, create: createFrame },
+  { id: '오브젝트2', name: '벤치',        labels: ['길이', '깊이'],             def: [150, 45],  next: () => bump('bench'),  create: (w, h, n) => createProp('bench', '벤치', w, h, n) },
+  { id: '오브젝트3', name: '조각상',      labels: ['받침대 폭', '전체 높이'],   def: [50, 160],  next: () => bump('statue'), create: (w, h, n) => createProp('statue', '조각상', w, h, n) },
+  { id: '오브젝트4', name: '유리 진열장', labels: ['가로 길이', '전체 높이'],   def: [60, 120],  next: () => bump('case'),   create: (w, h, n) => createProp('case', '유리 진열장', w, h, n) },
+  { id: '오브젝트5', name: '화분',        labels: ['화분 지름', '전체 높이'],   def: [40, 130],  next: () => bump('plant'),  create: (w, h, n) => createProp('plant', '화분', w, h, n) },
+  { id: '오브젝트7', name: '대리석 기둥',  labels: ['기둥 지름', '전체 높이'],   def: [40, 300],  next: () => bump('column'),  create: (w, h, n) => createProp('column', '대리석 기둥', w, h, n) },
+  { id: '오브젝트8', name: '로프 안전선',  labels: ['기둥 사이 길이', '기둥 높이'], def: [200, 90], next: () => bump('rope'),    create: (w, h, n) => createProp('rope', '로프 안전선', w, h, n) },
+  { id: '오브젝트9', name: '도자기 좌대',  labels: ['좌대 폭', '전체 높이'],     def: [40, 130],  next: () => bump('vase'),    create: (w, h, n) => createProp('vase', '도자기 좌대', w, h, n) },
+  { id: '오브젝트10', name: '흉상',        labels: ['받침대 폭', '전체 높이'],   def: [40, 150],  next: () => bump('bust'),    create: (w, h, n) => createProp('bust', '흉상', w, h, n) },
+  { id: '오브젝트11', name: '이젤',        labels: ['캔버스 폭', '전체 높이'],   def: [60, 170],  next: () => bump('easel'),   create: (w, h, n) => createProp('easel', '이젤', w, h, n) },
+  { id: '오브젝트12', name: '원형 의자',   labels: ['지름', '높이'],             def: [90, 45],   next: () => bump('ottoman'), create: (w, h, n) => createProp('ottoman', '원형 의자', w, h, n) },
+  { id: '오브젝트13', name: '작품 설명대', labels: ['설명판 폭', '전체 높이'],   def: [40, 110],  next: () => bump('plaque'),  create: (w, h, n) => createProp('plaque', '작품 설명대', w, h, n) },
+  { id: '오브젝트14', name: '안내 데스크', labels: ['길이', '깊이'],             def: [180, 70],  next: () => bump('desk'),    create: (w, h, n) => createProp('desk', '안내 데스크', w, h, n) },
+  { id: '오브젝트15', name: '분수대',      labels: ['분수 지름', '전체 높이'],   def: [150, 140], next: () => bump('fountain'),  create: (w, h, n) => createProp('fountain', '분수대', w, h, n) },
+  { id: '오브젝트16', name: '스탠드 조명', labels: ['갓 지름', '전체 높이'],     def: [45, 170],  next: () => bump('lamp'),      create: (w, h, n) => createProp('lamp', '스탠드 조명', w, h, n) },
+  { id: '오브젝트17', name: '소파',        labels: ['길이', '깊이'],             def: [200, 90],  next: () => bump('sofa'),      create: (w, h, n) => createProp('sofa', '소파', w, h, n) },
+  { id: '오브젝트18', name: '괘종시계',    labels: ['시계 폭', '전체 높이'],     def: [50, 220],  next: () => bump('clock'),     create: (w, h, n) => createProp('clock', '괘종시계', w, h, n) },
+  { id: '오브젝트19', name: '전시 파티션', labels: ['파티션 폭', '높이'],        def: [180, 240], next: () => bump('partition'), create: (w, h, n) => createProp('partition', '전시 파티션', w, h, n) },
+  { id: '오브젝트20', name: '전시 단상',   labels: ['아래단 폭', '전체 높이'],   def: [120, 45],  next: () => bump('platform'),  create: (w, h, n) => createProp('platform', '전시 단상', w, h, n) },
+  { id: '오브젝트21', name: '안내 입간판', labels: ['간판 폭', '높이'],          def: [50, 100],  next: () => bump('sign'),      create: (w, h, n) => createProp('sign', '안내 입간판', w, h, n) },
+  { id: '오브젝트22', name: '디지털 안내기', labels: ['화면 폭', '전체 높이'],   def: [60, 150],  next: () => bump('kiosk'),     create: (w, h, n) => createProp('kiosk', '디지털 안내기', w, h, n) },
+  { id: '오브젝트23', name: '큐브 조각',   labels: ['아래 큐브 폭', '전체 높이'], def: [50, 180], next: () => bump('cubes'),     create: (w, h, n) => createProp('cubes', '큐브 조각', w, h, n) },
+  { id: '오브젝트24', name: '그랜드 피아노', labels: ['길이', '깊이'],           def: [150, 160], next: () => bump('piano'),     create: (w, h, n) => createProp('piano', '그랜드 피아노', w, h, n) },
+  { id: '오브젝트6', name: '문',          labels: ['문 너비', '문 높이'],        def: [100, 220], next: () => doorSeq + 1,    create: createDoor }
+];
+Object.entries(WALL_ITEMS).forEach(([k, it], n) => OBJECTS.push({     // 2D오브젝트 10종: 2D 모드의 메뉴에만 나타남 (wall2D)
+  id: '2D오브젝트' + (n + 1), name: it.label, labels: it.labels, def: it.def, wall2D: true,
+  next: () => (itemNo[k] || 0) + 1, create: (w, h, nm) => createWallItem(k, w, h, nm)
+}));
+let pendingObj = null;                               // 메뉴에서 고른 오브젝트: 크기를 넣고 [생성]을 눌러야 만들어짐
+const closeObj = () => { $('objMenu').hidden = $('objForm').hidden = $('rotBox').hidden = true; $('objBtn').classList.remove('on'); editing = null; $('objCreate').textContent = '생성'; };
+/* ★ 2D 벽면 보기에서만 쓰는 '2D오브젝트' 목록: 벽에 붙는 오브젝트만 여기에 넣으세요 (OBJECTS의 name과 같게).
+ * 새 벽면 오브젝트를 OBJECTS에 추가했다면 이 목록에 이름만 적으면 2D오브젝트 메뉴에도 나타납니다. */
+const WALL_OBJECT_NAMES = ['액자', '문'];
+const objLabel = () => mode === 'wall' ? '2D오브젝트' : '오브젝트';      // 2D 모드에서는 버튼 이름이 바뀜
+function renderObjMenu() {                           // 현재 시점 모드에 맞는 오브젝트 버튼들로 메뉴를 다시 채움
+  const menu = $('objMenu');
+  menu.innerHTML = '';
+  const list = mode === 'wall' ? OBJECTS.filter(o => o.wall2D || WALL_OBJECT_NAMES.includes(o.name)) : OBJECTS.filter(o => !o.wall2D);   // 2D: 벽 오브젝트만 / 그 외: 바닥·일반 오브젝트
+  list.forEach(o => {
+    const b = document.createElement('button');
+    b.className = 'mbtn';  b.textContent = o.name;  b.title = o.id;
+    b.onclick = () => {
+      pendingObj = o;  $('objMenu').hidden = true;
+      $('objFormTitle').textContent = o.name + ' 이름과 크기 입력' + (mode === 'wall' ? ' (' + WALLS[wallView].name + '에 생성)' : '');
+      $('lblW').textContent = o.labels[0];  $('lblH').textContent = o.labels[1];     // 오브젝트마다 크기칸 이름·기본값이 다름
+      $('objW').value = o.def[0];  $('objH').value = o.def[1];
+      $('objName').value = '';  $('objName').placeholder = o.name + ' ' + o.next();   // 비워 두면 이 이름으로 지어짐
+      $('rotBox').hidden = true;  $('objForm').hidden = false;  $('objName').focus();
+    };
+    menu.appendChild(b);
+  });
+}
+function syncObjMode() {                             // 시점이 바뀔 때 호출: 열려 있던 창을 닫고 버튼 이름·목록을 바꿈
+  $('objCancel').onclick();                          // 열려 있던 메뉴/입력창 닫기 (회전 미리보기도 원래대로)
+  pendingObj = null;
+  $('objBtn').textContent = objLabel();
+  renderObjMenu();
+}
+renderObjMenu();
+const OBJ_VISIBLE = 5;                               // 메뉴에 한 번에 보이는 버튼 수
+function fitObjMenu() {                              // 메뉴 높이를 '버튼 5개 + 위아래 여백'에 딱 맞춤 (나머지는 스크롤)
+  const m = $('objMenu'), b = m.children;
+  if (b.length <= OBJ_VISIBLE) { m.style.maxHeight = ''; return; }
+  const cs = getComputedStyle(m), last = b[OBJ_VISIBLE - 1];
+  const h = last.offsetTop + last.offsetHeight - b[0].offsetTop + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+  m.style.maxHeight = Math.min(h, innerHeight - 150) + 'px';
+  m.scrollTop = 0;
+}
+$('objBtn').onclick = () => {
+  const wasClosed = $('objMenu').hidden && $('objForm').hidden;
+  closeObj();
+  if (wasClosed) { $('objMenu').hidden = false; $('objBtn').classList.add('on'); fitObjMenu(); }
+};
+{                                                    // 마우스로 메뉴를 위아래로 끌어서 스크롤 (터치는 기본 스크롤 사용). 끌었을 땐 버튼 클릭으로 처리하지 않음
+  const m = $('objMenu');  let sy = 0, st = 0, down = false, moved = false;
+  m.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse' || e.button !== 0) return; down = true; moved = false; sy = e.clientY; st = m.scrollTop; });
+  addEventListener('pointermove', e => {
+    if (!down) return;
+    if (!moved && Math.abs(e.clientY - sy) > 5) { moved = true; m.classList.add('dragging'); }
+    if (moved) m.scrollTop = st - (e.clientY - sy);
+  });
+  addEventListener('pointerup', () => { down = false; m.classList.remove('dragging'); });
+  m.addEventListener('click', e => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+}
+$('objCreate').onclick = () => {                     // [생성] (수정 중이면 [적용])
+  const num = (id, def) => { const v = parseFloat($(id).value); return isFinite(v) ? v : def; };
+  if (editing) {
+    const o = editing, w = num('objW', Math.round((o.fw || o.w) * 100)), h = num('objH', Math.round((o.fh || o.h) * 100)), n = $('objName').value;
+    if (o.group.userData.prop) editProp(o, n, w, h); else editFrame(o, n, w, h);
+  } else if (pendingObj) pendingObj.create(num('objW', pendingObj.def[0]), num('objH', pendingObj.def[1]), $('objName').value);
+  closeObj();
+};
+const rotR = $('objRot'), rotN = $('objRotNum');   // 회전: 슬라이더 · 숫자 · 방향 버튼 (움직이는 즉시 화면에 반영, [취소]하면 원래대로)
+let rotStart = 0;
+const propDeg = p => Math.round(((p.group.rotation.y * 180 / Math.PI) % 360 + 360) % 360) % 360;
+function setPropAngle(d) {
+  const p = editing;
+  if (!p || !p.group.userData.prop) return;
+  d = ((Math.round(+d) || 0) % 360 + 360) % 360;
+  p.group.rotation.y = d * Math.PI / 180;  placeProp(p, p.group.position.x, p.group.position.z);   // 벽에 걸치지 않게 위치도 다시 맞춤
+  rotR.value = rotN.value = d;
+}
+rotR.oninput = () => setPropAngle(rotR.value);
+rotN.onchange = () => setPropAngle(rotN.value);
+document.querySelectorAll('#rotBox [data-deg]').forEach(b => b.onclick = () => setPropAngle(b.dataset.deg));   // 북·동·남·서: 소품의 앞면이 그쪽을 봄
+$('objCancel').onclick = () => {
+  if (editing && editing.group.userData.prop) { editing.group.rotation.y = rotStart;  placeProp(editing, editing.group.position.x, editing.group.position.z); }
+  closeObj();
+};
+$('objEdit').onclick = () => {                       // [수정]: 선택한 오브젝트의 이름·크기를 입력창에 채워서 보여줌
+  const o = selFrame || selProp;
+  if (!o) return;
+  const type = (selProp || o.item) ? o.label : o.kind === 'door' ? '문' : '액자', cfg = OBJECTS.find(x => x.name === type);
+  closeObj();  editing = o;
+  $('objFormTitle').textContent = type + ' 수정';
+  $('lblW').textContent = cfg.labels[0];  $('lblH').textContent = cfg.labels[1];
+  $('objName').value = o.name;  $('objName').placeholder = '';
+  $('objW').value = Math.round((o.fw || o.w) * 100);  $('objH').value = Math.round((o.fh || o.h) * 100);
+  $('objCreate').textContent = '적용';
+  if (selProp) { rotStart = o.group.rotation.y;  rotR.value = rotN.value = propDeg(o);  $('rotBox').hidden = false; }   // 바닥 소품만 회전 가능 (액자·문은 벽에 붙어 있음)
+  $('objForm').hidden = false;  $('objBtn').classList.add('on');  $('objName').focus();
+};
+['objName', 'objW', 'objH'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') $('objCreate').click(); }));
+const deleteSelected = () => { if (selFrame) removeFrame(selFrame); else if (selProp) removeProp(selProp); };
+$('frameDel').onclick = deleteSelected;
+addEventListener('keydown', e => {                   // 바닥 소품 선택 후 R 키: 90° 회전 (버튼 대신 단축키)
+  if (e.code === 'KeyR' && selProp && !typing(e) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    selProp.group.rotation.y += Math.PI / 2;  placeProp(selProp, selProp.group.position.x, selProp.group.position.z);
+    if (editing === selProp) rotR.value = rotN.value = propDeg(selProp);
+  }
+});
+addEventListener('keydown', e => {                   // Delete 키로도 삭제
+  if ((e.key === 'Delete' || e.key === 'Backspace') && (selFrame || selProp) && !/INPUT|TEXTAREA/.test(e.target.tagName)) {
+    e.preventDefault();  deleteSelected();
+  }
+});
+canvas.addEventListener('wheel', e => {              // 휠: 확대/축소
+  if (mode === 'center') userFov = clamp(userFov + e.deltaY * 0.03, 35, 85);                            // 중앙 시점: 시야각(FOV)
+  else if (mode === 'top') orbit.zoom = clamp(orbit.zoom * Math.exp(e.deltaY * 0.001), 0.2, 1.4);     // 3D 시점: 가까이/멀리
+  else if (mode === 'wall') view2D.zoom = clamp(view2D.zoom * Math.exp(e.deltaY * 0.001), 0.15, 1.6);   // 2D 시점: 가까이/멀리
+}, { passive: true });
+
+/* ---------- 방향키(또는 WASD)로 시점 이동 ----------
+ * 중앙 시점: ↑ 앞 / ↓ 뒤 / ← 왼쪽 / → 오른쪽으로 걷기 (보고 있는 방향 기준, 소품과 벽은 통과 못 함)
+ * 3D 시점:  ← → 방 둘레 돌기 / ↑ ↓ 가까이·멀리 */
+const typing = e => e.target.matches && e.target.matches('input:not([type=range]), textarea, select');   // 글자·숫자 입력 중에는 이동 안 함
+addEventListener('keydown', e => {
+  if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^(Arrow(Up|Down|Left|Right)|Key[WASD])$/.test(e.code)) { keys.add(e.code); e.preventDefault(); }
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+function blocked(x, z) {                             // 벤치·조각상 같은 소품과 겹치는 자리인지 (여유 0.35m)
+  return props.some(p => {
+    const [ex, ez] = propHalf(p), hx = ex + 0.35, hz = ez + 0.35;
+    return Math.abs(x - p.group.position.x) < hx && Math.abs(z - p.group.position.z) < hz;
+  });
+}
+
+/* ---------- 시점 버튼: A(3D 쿼터뷰) / B(2D 벽면 보기) ---------- */
+const btn3D = $('btn3D'), btn2D = $('btn2D'), dirMenu = $('dirMenu'), angleMenu = $('angleMenu');
+/* 방향별로 '마지막에 보던 자리'를 기억: 3D/2D에서 움직이다 나갔다가 같은 방향으로 다시 들어오면 처음 자리가 아니라 그 자리로 돌아옴
+ * (걸어 다니던 중앙 시점의 위치는 walk/yaw/pitch가 계속 유지되므로 따로 저장할 필요 없음) */
+const orbitMem = {}, wallMem = {};                   // orbitMem[3D 방향] = {yaw, pitch, zoom} / wallMem[벽 번호] = {zoom, px, py}
+function rememberView() {                            // 모드를 바꾸기 직전, 지금 3D/2D 화면의 자리 저장
+  if (mode === 'top') orbitMem[topSide] = { yaw: orbit.yaw, pitch: orbit.pitch, zoom: orbit.zoom };
+  else if (mode === 'wall') wallMem[wallView] = { zoom: view2D.zoom, px: view2D.px, py: view2D.py };
+}
+function setMode(m, i) {                             // 모드 변경 + 버튼 상태 갱신 (i: 방향/각도 번호)
+  rememberView();
+  mode = m;
+  if (m === 'wall' && i !== undefined) {             // 벽을 고르면 마지막에 보던 위치·크기로 (처음이면 기본값)
+    wallView = i;
+    const v = wallMem[i] || { zoom: 1, px: 0, py: 0 };
+    view2D.zoom = v.zoom;  view2D.px = v.px;  view2D.py = v.py;
+  }
+  if (m === 'top' && i !== undefined) {              // 방향을 고르면 마지막에 보던 3D 각도로 (처음이면 그 방향의 기본 각도)
+    topSide = i;
+    if (orbitMem[i]) Object.assign(orbit, orbitMem[i]);  else resetOrbit();
+  }
+  btn3D.classList.toggle('on', m === 'top');
+  btn2D.classList.toggle('on', m === 'wall');
+  [...angleMenu.children].forEach(b => b.classList.toggle('on', m === 'top' && +b.dataset.i === topSide));
+  [...dirMenu.children].forEach(b => b.classList.toggle('on', m === 'wall' && +b.dataset.i === wallView));
+  angleMenu.hidden = dirMenu.hidden = true;          // 선택 후 메뉴 닫기
+  if (m === 'wall') selectWall(wallView);            // 크기 조절 패널도 그 벽으로 맞춤
+  syncObjMode();                                     // 2D면 '2D오브젝트'(벽면 전용), 아니면 '오브젝트'
+  $('btnHome').hidden = m === 'center';              // 원위치 버튼은 3D/2D 화면에 들어간 뒤에만 보임
+}
+$('btnHome').onclick = () => setMode('center');      // 버튼 C: 원위치 → 처음(걸어 다니던) 중앙 시점으로 한 번에 복귀
+btn3D.onclick = () => { angleMenu.hidden = !angleMenu.hidden; dirMenu.hidden = true; };   // 버튼 A: 3D 각도 메뉴 열기/닫기
+btn2D.onclick = () => { dirMenu.hidden = !dirMenu.hidden; angleMenu.hidden = true; };     // 버튼 B: 2D 방향 메뉴 열기/닫기
+// 동·서·남·북 선택지 4개 (WALLS 번호: 0북 1동 2남 3서). 같은 항목을 다시 누르면 중앙 시점으로 복귀
+[1, 3, 2, 0].forEach(i => {
+  const name = WALLS[i].name.replace(' 벽', '');
+  const a = document.createElement('button');        // 버튼 A 메뉴: 그 방향에서 내려다보기(그쪽 벽이 투명해짐)
+  a.className = 'mbtn';  a.dataset.i = i;  a.textContent = name;
+  a.onclick = () => setMode(mode === 'top' && topSide === i ? 'center' : 'top', i);
+  angleMenu.appendChild(a);
+  const b = document.createElement('button');        // 버튼 B 메뉴: 그 벽만 정면으로 보기
+  b.className = 'mbtn';  b.dataset.i = i;  b.textContent = name;
+  b.onclick = () => setMode(mode === 'wall' && wallView === i ? 'center' : 'wall', i);
+  dirMenu.appendChild(b);
+});
+
+// 3D 쿼터뷰 카메라 위치: 선택한 벽 바깥쪽 위 대각선 (방이 클수록 멀리, 세로 화면이면 더 멀리)
+function topViewPosition() {
+  const th = walls[topSide].group.rotation.y;
+  const o = new THREE.Vector3(-Math.sin(th), 0, -Math.cos(th));   // 숨길 벽의 바깥 방향
+  const q = new THREE.Vector3(o.z, 0, -o.x);                      // 그 벽과 나란한 방향 (대각선 느낌)
+  const dist = Math.max(roomW, roomD) * 1.9 * Math.max(1, 1.3 / camera.aspect);
+  const n = new THREE.Vector3(0.3, 0.85, 1).normalize().multiplyScalar(dist);  // n.x 옆, n.y 높이, n.z 바깥
+  const side = Math.min(n.x, (topSide % 2 ? roomD : roomW) * 0.35);  // 옆벽 밖으로 나가면 벽이 안 보이므로 제한
+  return o.multiplyScalar(n.z).add(q.multiplyScalar(side)).add(new THREE.Vector3(0, n.y + 1.5, 0));
+}
+
+// 3D 카메라 거리의 기준값 (방이 클수록 멀리, 세로 화면이면 더 멀리)
+function orbitBase() { return Math.max(roomW, roomD) * 1.9 * Math.max(1, 1.3 / camera.aspect); }
+function resetOrbit() {                              // 선택한 방향의 기본 3D 위치를 yaw/pitch/zoom 값으로 바꿔 저장
+  const v = topViewPosition().sub(new THREE.Vector3(0, 1.5, 0));
+  orbit.yaw = Math.atan2(v.x, v.z);  orbit.pitch = Math.asin(v.y / v.length());  orbit.zoom = v.length() / orbitBase();
+}
+const topDots = [0, 0, 0, 0];                        // 벽별 '카메라 쪽을 향한 정도' (1에 가까울수록 카메라 바로 앞의 벽)
+
+/* ---------- 벽 투명화 (3D 모드에서 앞을 가리는 벽 + 액자) ---------- */
+const alphas = [1, 1, 1, 1];   // 벽별 현재 투명도 (북·동·남·서)
+function applyAlpha(group, a) {                      // 매번 traverse하지 않고, 재질이 있는 물체 목록을 캐시해서 사용
+  const ud = group.userData;
+  if (ud.alphaVer !== wallTreeVer) {                 // 액자가 생기거나 사라졌을 때만 목록을 다시 만듦
+    ud.alphaMeshes = [];
+    group.traverse(o => { if (o.material) ud.alphaMeshes.push(o); });
+    ud.alphaVer = wallTreeVer;
+  }
+  const t = a < 1;
+  for (const o of ud.alphaMeshes) {                  // 재질은 매번 o.material로 읽어서, 재질이 교체돼도 안전
+    const m = o.material;
+    if (m.transparent !== t) m.transparent = t;
+    m.opacity = a;
+  }
+}
+
+/* ---------- 애니메이션 루프 ---------- */
+const goalPos = new THREE.Vector3(), goalLook = new THREE.Vector3();
+const lookNow = new THREE.Vector3(0, EYE_H, -10);   // 현재 바라보는 지점 (부드러운 이동용)
+let goalFov = 60;
+camera.position.set(0, EYE_H, 0);
+
+let lastT = performance.now();
+const camDir = new THREE.Vector3();  let lastHd = 1e9;   // 나침반용: 카메라 방향 / 마지막으로 표시한 각도
+const cDisc = $('cDisc'), cLetters = [...cDisc.querySelectorAll('text')];
+{                                                    // 나침반 눈금: 5°마다 짧은 선, 15°마다 중간, 45°마다 긴 선
+  const NS = 'http://www.w3.org/2000/svg', g = document.createElementNS(NS, 'g');
+  g.setAttribute('stroke', '#d8bd7a');
+  for (let a = 0; a < 360; a += 5) {
+    const len = a % 45 === 0 ? 5 : a % 15 === 0 ? 3.4 : 2, l = document.createElementNS(NS, 'line');
+    l.setAttribute('x1', 50);  l.setAttribute('x2', 50);  l.setAttribute('y1', 6.5);  l.setAttribute('y2', 6.5 + len);
+    l.setAttribute('stroke-width', a % 45 === 0 ? 0.9 : 0.5);  l.setAttribute('transform', `rotate(${a} 50 50)`);
+    g.appendChild(l);
+  }
+  cDisc.insertBefore(g, cDisc.firstChild);
+}
+function setCompass(hd) {                            // 나침반 판을 돌리고, 글자는 반대로 돌려 항상 바로 서 있게 함
+  cDisc.setAttribute('transform', `rotate(${(-hd).toFixed(1)} 50 50)`);
+  cLetters.forEach(t => t.setAttribute('transform', `rotate(${hd.toFixed(1)} ${t.getAttribute('x')} ${t.getAttribute('y')})`));
+}
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now(), dt = Math.min(0.05, (now - lastT) / 1000);  lastT = now;   // 프레임 간격(초)
+
+  // 0) 방향키 입력 처리
+  const key = (...c) => c.some(k => keys.has(k));
+  const fwd = (key('ArrowUp', 'KeyW') ? 1 : 0) - (key('ArrowDown', 'KeyS') ? 1 : 0);
+  const str = (key('ArrowRight', 'KeyD') ? 1 : 0) - (key('ArrowLeft', 'KeyA') ? 1 : 0);
+  if (mode === 'center' && (fwd || str)) {           // 걷기: 보고 있는 방향(yaw) 기준으로 앞뒤·좌우 이동
+    const sp = WALK_SPEED * dt / Math.hypot(fwd, str);
+    const mx = (-Math.sin(yaw) * fwd + Math.cos(yaw) * str) * sp, mz = (-Math.cos(yaw) * fwd - Math.sin(yaw) * str) * sp;
+    const lx = Math.max(0, roomW / 2 - 0.4), lz = Math.max(0, roomD / 2 - 0.4), stuck = blocked(walk.x, walk.z);
+    const nx = clamp(walk.x + mx, -lx, lx), nz = clamp(walk.z + mz, -lz, lz);
+    if (stuck || !blocked(nx, walk.z)) walk.x = nx;  // 소품에 막히면 그 방향만 멈추고 옆으로는 미끄러짐
+    if (stuck || !blocked(walk.x, nz)) walk.z = nz;
+  } else if (mode === 'top') {                       // 3D: 좌우는 방 둘레 돌기, 위아래는 확대·축소
+    orbit.yaw += str * 1.2 * MOVE_BOOST * dt;
+    orbit.zoom = clamp(orbit.zoom * Math.exp(-fwd * 0.9 * MOVE_BOOST * dt), 0.2, 1.4);
+  } else if (mode === 'wall') {                      // 2D: 좌우는 벽을 따라 이동, 위아래는 확대·축소
+    view2D.px += str * view2D.wpp * 400 * MOVE_BOOST * dt;
+    view2D.zoom = clamp(view2D.zoom * Math.exp(-fwd * 0.9 * MOVE_BOOST * dt), 0.15, 1.6);
+  }
+
+  // 1) 모드별 카메라 목표 위치 / 시선 / 화각 계산
+  if (mode === 'top') {                              // 3D: 방 중심(0, 1.5, 0)을 도는 카메라
+    const d = orbitBase() * orbit.zoom, cp = Math.cos(orbit.pitch);
+    goalPos.set(Math.sin(orbit.yaw) * cp * d, 1.5 + Math.sin(orbit.pitch) * d, Math.cos(orbit.yaw) * cp * d);
+    goalLook.set(0, 1.5, 0);
+    goalFov = 50;
+    walls.forEach((w, i) => { topDots[i] = -Math.cos(w.group.rotation.y - orbit.yaw); });   // 벽 바깥쪽 방향과 카메라 방향의 일치도
+    let best = topSide;
+    topDots.forEach((v, i) => { if (v > topDots[best] + 0.05) best = i; });                // 카메라 정면 벽 (경계에서 깜빡이지 않게 여유를 둠)
+    if (best !== topSide) {
+      topSide = best;
+      [...angleMenu.children].forEach(b => b.classList.toggle('on', +b.dataset.i === topSide));
+    }
+  } else if (mode === 'wall') {                      // 2D: 선택한 벽 정면에서 수평으로 바라봄
+    const g = walls[wallView].group, d = dims[wallView];
+    goalFov = 40;
+    const dist = Math.max(d.h * 1.3, d.w * 1.15 / camera.aspect) / (2 * Math.tan(THREE.MathUtils.degToRad(goalFov / 2))) * view2D.zoom;   // 휠로 가까이/멀리
+    const nx = Math.sin(g.rotation.y), nz = Math.cos(g.rotation.y);   // 벽이 바라보는(방 안쪽) 방향
+    view2D.px = clamp(view2D.px, -d.w, d.w);  view2D.py = clamp(view2D.py, -d.h / 2, d.h / 2);
+    view2D.wpp = 2 * dist * Math.tan(THREE.MathUtils.degToRad(goalFov / 2)) / innerHeight;   // 화면 1px이 벽 위에서 몇 m인지 (드래그 이동량 계산용)
+    const rx = nz, rz = -nx;                                          // 화면 오른쪽 방향 (벽을 따라가는 방향)
+    goalLook.set(g.position.x + rx * view2D.px, d.h / 2 + view2D.py, g.position.z + rz * view2D.px);   // 정면을 유지한 채 평행 이동
+    goalPos.set(goalLook.x + nx * dist, goalLook.y, goalLook.z + nz * dist);
+  } else {                                           // 중앙 시점: yaw/pitch로 시선 방향 계산
+    goalPos.set(walk.x, EYE_H, walk.z);
+    goalFov = userFov;
+    goalLook.set(
+      goalPos.x - Math.sin(yaw) * Math.cos(pitch),
+      goalPos.y + Math.sin(pitch),
+      goalPos.z - Math.cos(yaw) * Math.cos(pitch)
+    ).sub(goalPos).multiplyScalar(10).add(goalPos);
+  }
+
+  // 2) 목표를 향해 부드럽게 이동 (lerp) → 시점 전환 애니메이션
+  const k = mode === 'center' ? 0.12 : dragging ? 0.25 : mode === 'top' ? 0.09 : 0.07;   // 드래그 중엔 즉각 반응
+  camera.position.lerp(goalPos, k);
+  lookNow.lerp(goalLook, k);
+  camera.lookAt(lookNow);
+  camera.getWorldDirection(camDir);                  // 나침반: 카메라가 바라보는 방향이 위쪽, 북쪽(-z)이 그 기준으로 어디인지 표시
+  const hd = Math.atan2(camDir.x, -camDir.z) * 180 / Math.PI;
+  if (Math.abs(hd - lastHd) > 0.05) { setCompass(hd); lastHd = hd; }
+  // 아주 작은 벽(1cm)에 바짝 다가가도 잘리지 않도록 가까운 한계(near)를 거리에 맞춰 조절
+  const near = clamp(camera.position.distanceTo(lookNow) * 0.05, 0.001, 0.1);
+  // far도 방 크기에 맞춰 줄여 깊이 정밀도(near:far 비율)를 지킴 → 액자가 벽에 붙어 있어도 깜빡임(z-fighting)이 줄어듦
+  const far = camera.position.length() + Math.hypot(roomW, roomD, roomH) * 0.6 + 1;
+  if (near !== camera.near || Math.abs(far - camera.far) > camera.far * 0.02) { camera.near = near; camera.far = far; camera.updateProjectionMatrix(); }
+  if (Math.abs(goalFov - camera.fov) > 0.01) { camera.fov += (goalFov - camera.fov) * k; camera.updateProjectionMatrix(); }
+
+  // 3) 벽 페이드: 3D 모드에서 선택한 방향의 벽만 투명, 나머지는 불투명
+  alphas.forEach((a, i) => {
+    const target = (mode === 'top' && (topSide === i || topDots[i] > 0.4)) ? 0 : 1;   // 카메라 쪽을 향한 벽은 투명 (대각선이면 두 벽)
+    const stale = alphas[i] < 1 && walls[i].group.userData.alphaVer !== wallTreeVer;   // 투명한 벽에 새 액자가 붙으면 그 액자도 투명하게
+    if (a === target && !stale) return;
+    let na = a + (target - a) * 0.1;
+    if (Math.abs(target - na) < 0.01) na = target;
+    alphas[i] = na;
+    applyAlpha(walls[i].group, na);
+  });
+
+  // 4) 표시 여부: 2D 모드는 선택한 벽(액자 포함)만, 바닥/천장/바탕 벽은 숨김
+  walls.forEach((w, i) => {
+    w.group.visible = mode === 'wall' ? i === wallView : alphas[i] > 0.02;
+    w.shell.visible = mode !== 'wall';
+  });
+  const cGoal = mode === 'top' ? 0 : 1;               // 천장: 3D 시점이면 서서히 사라지고, 중앙 시점으로 돌아오면 다시 나타남
+  if (ceilA !== cGoal) {
+    ceilA += (cGoal - ceilA) * 0.1;  if (Math.abs(cGoal - ceilA) < 0.01) ceilA = cGoal;
+    const t = ceilA < 1;
+    ceilMats.forEach(m => { if (m.transparent !== t) m.transparent = t; m.opacity = ceilA; });
+  }
+  floor.visible = mode !== 'wall';
+  ceiling.visible = mode !== 'wall' && ceilA > 0.02;
+  props.forEach(p => p.group.visible = mode !== 'wall');   // 2D 벽면 보기에서는 바닥 소품 숨김
+
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ---------- 세이브 / 로드 ----------
+ * [세이브]: 지금 전시관(벽 크기·상하연동·바닥·천장·벽지·액자/문/2D오브젝트·바닥 오브젝트·내가 고른 이미지)을
+ *           .json 파일 하나로 내려받습니다. 내가 올린 이미지는 파일 안에 함께 들어가서 나중에 그대로 복원돼요.
+ * [로드]:   저장해 둔 .json 파일을 고르면 지금 전시관이 그 내용으로 바뀝니다. (친구에게 파일을 보내서 열어 볼 수도 있어요)
+ * 기본 액자 그림처럼 인터넷 주소로 불러온 이미지는 주소만 저장하므로, 로드할 때 인터넷이 연결돼 있어야 해요. */
+const SAVE_APP = 'virtual-art-gallery', SAVE_VER = 1;
+const saveMsg = $('saveMsg');
+const say = t => { saveMsg.textContent = t; saveMsg.hidden = !t; };
+
+function imgToDataURL(src, maxSide = 1600) {         // 내가 올린 이미지(임시 주소)를 파일에 담을 수 있는 글자(data URL)로 바꿈. 너무 크면 줄여서 용량 절약
+  return new Promise(res => {
+    if (!src || !src.startsWith('blob:')) return res(src || null);   // data: 이거나 인터넷 주소면 그대로
+    const im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, maxSide / Math.max(im.width, im.height)), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(im.width * k));  c.height = Math.max(1, Math.round(im.height * k));
+      const g = c.getContext('2d');  g.fillStyle = '#fff';  g.fillRect(0, 0, c.width, c.height);  g.drawImage(im, 0, 0, c.width, c.height);
+      res(c.toDataURL('image/jpeg', 0.88));
+    };
+    im.onerror = () => res(null);
+    im.src = src;
+  });
+}
+
+async function collectState() {                      // 지금 전시관 상태를 하나의 객체로 모으기
+  const num = v => Math.round(v * 10000) / 10000;
+  const data = {
+    app: SAVE_APP, version: SAVE_VER, savedAt: new Date().toISOString(),
+    dims: dims.map(d => ({ w: d.w, h: d.h })), link: [link[0], link[1]],
+    floor: curFloor, ceiling: curCeil, wallStyle: curWall,
+    wallpapers: await Promise.all(walls.map(w => w.hasWp ? imgToDataURL(w.wpSrc) : null)),
+    frames: await Promise.all(frames.map(async f => ({
+      type: f.item ? 'item' : f.kind === 'door' ? 'door' : 'frame', key: f.item ? f.kind : undefined,
+      wall: f.i, x: num(f.group.position.x), y: num(f.group.position.y), w: num(f.fw), h: num(f.fh), name: f.name,
+      src: (f.item || f.kind === 'door') ? undefined : await imgToDataURL(f.src)
+    }))),
+    props: props.map(p => ({ kind: p.kind, label: p.label, name: p.name, w: num(p.w), h: num(p.h),
+      x: num(p.group.position.x), z: num(p.group.position.z), rot: num(p.group.rotation.y) }))
+  };
+  return data;
+}
+
+$('saveDo').onclick = async () => {
+  const btn = $('saveDo');  btn.disabled = true;  say('저장하는 중...');
+  try {
+    const blob = new Blob([JSON.stringify(await collectState())], { type: 'application/json' });
+    const d = new Date(), p2 = n => String(n).padStart(2, '0');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `gallery-save-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.json`;
+    document.body.appendChild(a);  a.click();  a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    say('저장했어요! 다운로드 폴더를 확인하세요.');
+  } catch (e) { console.error(e);  say('저장에 실패했어요.'); }
+  btn.disabled = false;
+};
+
+function resetWallpaper(i) {                         // 내 벽지를 지우고 지금 벽 스타일의 기본 모습으로 되돌림
+  const w = walls[i];
+  w.wpSrc = null;
+  if (wpBlobs[i]) { URL.revokeObjectURL(wpBlobs[i]);  wpBlobs[i] = null; }
+  applyWallStyle(w);
+  wpStatus[i].textContent = '기본 벽지';
+}
+
+function applyState(d) {                             // 저장된 내용으로 전시관 다시 만들기
+  closeObj();  selectFrame(null);  selectProp(null);
+  // 1) 지금 있는 오브젝트 모두 지우고 번호 새로 시작
+  [...frames].forEach(removeFrame);  [...props].forEach(removeProp);
+  frameSeq = 0;  doorSeq = 0;
+  Object.keys(propNo).forEach(k => delete propNo[k]);  Object.keys(itemNo).forEach(k => delete itemNo[k]);
+  // 2) 벽 크기 · 상하연동
+  d.dims.forEach((v, i) => { if (dims[i] && isFinite(v.w) && isFinite(v.h)) { dims[i].w = clamp(v.w, 0.01, 100);  dims[i].h = clamp(v.h, 0.01, 40); } });
+  dims.forEach(x => x.h = dims[0].h);
+  if (Array.isArray(d.link)) { link[0] = !!d.link[0];  link[1] = !!d.link[1]; }
+  updateRoom();  selectWall(selWall);  saveDims();  saveLink();
+  // 3) 바닥 · 천장
+  if (FLOORS[d.floor]) setFloor(d.floor);
+  if (CEILINGS[d.ceiling]) setCeiling(d.ceiling);
+  // 4) 벽 스타일 + 벽지
+  setWallStyle(WALL_STYLES[d.wallStyle] ? d.wallStyle : 0);
+  walls.forEach((w, i) => {
+    const src = (d.wallpapers || [])[i];
+    if (src) { loadWallpaper(i, src, ok => { wpStatus[i].textContent = ok ? '불러온 벽지' : '기본 벽지'; });  w.wpSrc = src; }
+    else resetWallpaper(i);
+  });
+  // 5) 액자 · 문 · 2D오브젝트 (저장된 벽에 그대로 만들기)
+  (d.frames || []).forEach(o => {
+    if (!(o.wall >= 0 && o.wall < 4)) return;
+    forceWall = o.wall;
+    try {
+      const w = o.w * 100, h = o.h * 100;
+      if (o.type === 'door') createDoor(w, h, o.name);
+      else if (o.type === 'item' && WALL_ITEMS[o.key]) createWallItem(o.key, w, h, o.name);
+      else if (o.type === 'frame') createFrame(w, h, o.name, o.src || undefined);
+      else return;
+      const f = frames[frames.length - 1];
+      placeFrame(f, o.wall, o.x, o.y);
+      if (f.entry && o.src && o.src.startsWith('data:')) f.entry.querySelector('span').textContent = '불러온 이미지';
+    } finally { forceWall = null; }
+  });
+  // 6) 바닥 오브젝트
+  (d.props || []).forEach(o => {
+    createProp(o.kind, o.label, o.w * 100, o.h * 100, o.name);
+    const p = props[props.length - 1];
+    p.group.rotation.y = o.rot || 0;
+    placeProp(p, o.x, o.z);
+  });
+  selectFrame(null);  selectProp(null);
+}
+
+$('loadDo').onclick = () => $('loadFile').click();
+$('loadFile').addEventListener('change', () => {
+  const file = $('loadFile').files[0];
+  $('loadFile').value = '';                          // 같은 파일을 다시 골라도 반응하도록 초기화
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onerror = () => say('파일을 읽을 수 없어요.');
+  rd.onload = () => {
+    let d;
+    try {
+      d = JSON.parse(rd.result);
+      if (!d || d.app !== SAVE_APP || !Array.isArray(d.dims) || d.dims.length !== 4) throw new Error('bad');
+    } catch (e) { say('올바른 세이브 파일이 아니에요.');  return; }
+    if ((frames.length || props.length) && !confirm('지금 전시관이 불러온 내용으로 바뀌어요. 계속할까요?')) { say('');  return; }
+    try { applyState(d);  say('불러왔어요!'); }
+    catch (e) { console.error(e);  say('불러오는 중 문제가 생겼어요.'); }
+  };
+  rd.readAsText(file);
+});
+$('saveBtn').addEventListener('click', () => {       // 버튼: 세이브 / 로드 패널 열기/닫기
+  $('savePanel').hidden = !$('savePanel').hidden;
+  $('saveBtn').classList.toggle('on', !$('savePanel').hidden);
+  if ($('savePanel').hidden) say('');
+});
+say('');
+
+/* ---------- 조작 안내 문구: 평상시에만 보이고, 버튼으로 패널·메뉴를 열거나 시점을 바꾸면 숨김 ---------- */
+const helpEl = $('help');
+const helpBusy = ['sizePanel', 'uploads', 'savePanel', 'objMenu', 'objForm', 'angleMenu', 'dirMenu'];   // 이 중 하나라도 열려 있으면 '평상시'가 아님
+function updateHelp() {
+  const hide = mode !== 'center' || helpBusy.some(id => !$(id).hidden);
+  if (helpEl.hidden !== hide) helpEl.hidden = hide;   // 값이 바뀔 때만 적용 (관찰자가 자기 자신을 계속 깨우지 않게)
+}
+new MutationObserver(updateHelp).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });   // 패널이 열리고 닫힐 때마다 확인
+updateHelp();
+
+/* ---------- 창 크기 변경 대응 ---------- */
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
