@@ -112,7 +112,48 @@
   #compass text.n { fill: #e0584a; }
   #topRight .btnrow { display: flex; gap: 8px; }                  /* [수정][삭제] / [생성][취소] 나란히 */
   #topRight .btnrow .mbtn { min-width: 0; padding-left: 4px; padding-right: 4px; }
-  @media (max-width: 560px) { #topLeft .panel { width: 200px; } }
+  /* AI 배치안 선택 패널: 다른 도구를 가리지 않으면서 모바일 화면에서도 사용 가능 */
+  #aiLayoutBox { position: fixed; z-index: 1000; top: 16px; left: 50%; transform: translateX(-50%);
+    width: min(364px, calc(100vw - 32px)); box-sizing: border-box; max-height: calc(100vh - 32px);
+    overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
+  #aiLayoutBox h3 { margin: 0; font-size: 17px; text-align: center; }
+  #aiLayoutBox > .hint { text-align: center; }
+  #aiLayoutBox .mbtn { width: 100%; box-shadow: none; font-size: 13px; padding: 11px 8px; text-align: left; }
+  #aiLayoutBox .aiClose { background: #e3e4e0; text-align: center; }
+  #aiLayoutBox .mbtn:disabled { opacity: 0.55; cursor: wait; }
+  #aiStatus { min-height: 16px; margin: 0; color: #475f50; font-size: 12px; text-align: center; }
+  .aiControls { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; }
+  .aiControls select { flex:1; min-width:0; padding:7px; font-size:13px; border:1px solid #aaa; background:#fff; border-radius:3px; }
+  #aiPlanSummary { max-height:240px; overflow:auto; background:#fff; border:1px solid #d9d9d9;
+    border-radius:4px; padding:9px; font-size:12px; line-height:1.55; }
+  #aiPlanSummary .aiPlanRow { border-bottom:1px solid #e7e7e7; padding:6px 0; }
+  #aiPlanSummary .aiPlanRow:last-child { border-bottom:0; }
+  #aiPlanSummary b { display:block; color:#284738; }
+  #aiPlanSummary small { display:block; color:#666; }
+
+  /* 실제 업로드 이미지 + 브라우저 CLIP 분석: 데이터 편집 패널 */
+  #aiArtList { display:flex; flex-direction:column; gap:7px; max-height:260px; overflow:auto;
+    border:1px solid #d9d9d9; padding:7px; background:#fff; border-radius:4px; }
+  .aiArtItem { display:grid; grid-template-columns:50px 1fr; gap:7px; padding-bottom:7px; border-bottom:1px solid #eee; }
+  .aiArtItem:last-child { border-bottom:none; padding-bottom:0; }
+  .aiArtItem img { width:50px; height:58px; object-fit:cover; background:#ddd; border-radius:3px; }
+  .aiArtFields { min-width:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
+  .aiArtFields label { display:flex; flex-direction:column; gap:1px; color:#666; font-size:10px; }
+  .aiArtFields .aiFull { grid-column:1/-1; }
+  .aiArtFields input, .aiArtFields select { width:100%; min-width:0; box-sizing:border-box; padding:4px 5px;
+    border:1px solid #bbb; border-radius:3px; font-size:12px; color:#222; background:#fff; }
+  .aiArtInfo { grid-column:1/-1; font-size:11px; color:#53645a; }
+  #aiFiles { width:100%; max-width:100%; font-size:12px; }
+  #aiLayoutBox .aiMiniActions { display:flex; gap:6px; }
+  #aiLayoutBox .aiMiniActions .mbtn { min-width:0; text-align:center; font-size:12px; padding:8px 5px; }
+  #aiImportNote { font-size:11px; color:#56615a; }
+  #aiCaptionBox { border-top: 1px solid #d8d9d5; padding-top: 10px; font-size: 12px; line-height: 1.6; }
+  #aiCaptionBox h4 { margin: 0 0 6px; font-size: 13px; }
+  #aiCaptionBox p { margin: 6px 0 0; color: #555; }
+  @media (max-width: 560px) {
+    #topLeft .panel { width: 200px; }
+    #aiLayoutBox { top: 58px; max-height: calc(100vh - 70px); }
+  }
 </style>
 </head>
 <body>
@@ -123,6 +164,7 @@
     <button class="mbtn" id="sizeBtn">크기 조절</button>   <!-- 버튼 C -->
     <button class="mbtn" id="imgBtn">이미지 선택</button>   <!-- 버튼 D -->
     <button class="mbtn" id="saveBtn">세이브 / 로드</button>   <!-- 버튼 E: 전시관 저장 · 불러오기 -->
+    <button class="mbtn" id="aiLayoutBtn" aria-controls="aiLayoutBox" aria-expanded="false" style="background:#2f4d40;color:#fff">AI 자동 배치</button>
   </div>
   <div class="panel" id="sizePanel" hidden>
     <div class="tabs" id="wallTabs"></div>
@@ -153,6 +195,7 @@
     <input type="file" id="loadFile" accept=".json,application/json" hidden>
     <p class="hint" id="saveMsg" hidden></p>
   </div>
+  <p class="hint" id="aiResult" hidden></p>
   <p class="hint" id="help">드래그: 둘러보기 / 휠: 확대·축소 / 방향키(WASD): 이동</p>
 </div>
 
@@ -179,7 +222,39 @@
   <div class="panel" id="framePanel" hidden>
     <p class="hint" style="margin:0"><b id="frameName"></b></p>
     <div class="btnrow"><button class="mbtn" id="objEdit">수정</button><button class="mbtn" id="frameDel">삭제</button></div>
+    <div id="aiCaptionBox" hidden></div>
   </div>
+</div>
+
+<!-- AI 배치안 선택 창 (보낸 샘플 코드의 네 가지 배치 방식을 적용) -->
+<div id="aiLayoutBox" class="panel" hidden role="dialog" aria-label="AI 자동 배치 시스템">
+  <h3>AI 자동 배치 시스템</h3>
+  <p class="hint">업로드 이미지 분석 결과 또는 예시 작품으로 배치 후보를 탐색합니다. 문·벽 크기·간격을 검증하고 문과 소품은 유지됩니다.</p>
+  <div style="border-top:1px solid #d5d6d3;padding-top:8px;display:flex;flex-direction:column;gap:6px">
+    <strong style="font-size:13px">1. 실제 작품 이미지 불러오기 · 분석</strong>
+    <input type="file" id="aiFiles" accept="image/jpeg,image/png,image/webp" multiple aria-label="분석할 작품 이미지 선택">
+    <p class="hint" id="aiImportNote">예시 작품 6개로 시작합니다. 이미지 1~7개를 선택하면 교체됩니다. 작품의 실제 cm 크기는 직접 입력해야 합니다.</p>
+    <div class="aiMiniActions">
+      <button class="mbtn" id="aiAnalyzeBtn">이미지 AI 분석 (CLIP)</button>
+      <button class="mbtn" id="aiDemoBtn">예시 작품 복원</button>
+    </div>
+    <p class="hint">CLIP 모델은 처음 사용할 때 인터넷에서 내려받아 이 기기에서 분석합니다. 주제를 추정하며 색온도·시각적 무게는 이미지 통계로 계산합니다. 분석 결과는 직접 수정할 수 있습니다.</p>
+    <div id="aiArtList" aria-label="작품 정보 편집" aria-live="polite"></div>
+  </div>
+  <strong style="font-size:13px">2. 자동 배치 최적화</strong>
+  <label class="aiControls" for="aiGapSelect"><span>액자 사이 간격</span>
+    <select id="aiGapSelect"><option value="0.15">15cm (기존)</option><option value="0.40">40cm (넓은 간격)</option></select>
+  </label>
+  <button class="mbtn" id="aiCompareBtn">4개 배치안 미리 비교 (공간·문 충돌 검증)</button>
+  <div id="aiPlanSummary" hidden aria-live="polite"></div>
+  <button class="mbtn" id="aiExportBtn" hidden>배치 결과 JSON 다운로드 (좌표·분석 정보)</button>
+  <button class="mbtn" data-ai-option="0">안 1. 주제 및 테마별 묶음 배치</button>
+  <button class="mbtn" data-ai-option="1">안 2. 색온도(시각적 분위기) 통일 배치</button>
+  <button class="mbtn" data-ai-option="2">안 3. 시각적 무게 균형 배치</button>
+  <button class="mbtn" data-ai-option="3">안 4. 형태 혼합 및 관람 흐름 배치</button>
+  <button class="mbtn" id="aiUndoBtn" hidden>바로 이전 배치 복원</button>
+  <p id="aiStatus" role="status" aria-live="polite"></p>
+  <button class="mbtn aiClose" id="aiCloseBtn">닫기</button>
 </div>
 
 <!-- 우측 하단: 나침반 (북=붉은 N. 지금 바라보는 방향이 위쪽의 작은 삼각형 쪽) -->
@@ -962,6 +1037,10 @@ function editFrame(f, name, wCm, hCm) {              // 액자·문의 이름과
   placeFrame(f, f.i, f.group.position.x, door ? h / 2 : f.group.position.y);   // 벽 안으로 다시 맞춤
   f.name = (name || '').trim().slice(0, 20) || f.name;          // 이름을 비우면 기존 이름 유지
   f.title = `${f.name} (${Math.round(w * 100)}cm × ${Math.round(h * 100)}cm)`;
+  if (f.captionData) {
+    f.captionData.title = f.name;
+    f.captionData.size = `${Math.round(w * 100)}×${Math.round(h * 100)}`;
+  }
   if (f.entry) f.entry.querySelector('b').textContent = f.title;   // 이미지 선택 목록의 이름도 갱신
   updatePanel();
 }
@@ -1276,6 +1355,7 @@ function updatePanel() {                             // 우측 '선택한 오브
   if (editing && editing !== o) closeObj();          // 다른 오브젝트를 고르면 수정창 닫기
   $('framePanel').hidden = !o;
   $('frameName').textContent = o ? o.title : '';
+  showAICaption(o);
 }
 
 function removeProp(p) {
@@ -1300,7 +1380,16 @@ function updateRoom() {
     w.shell.scale.set(layout[i][2], H, 1);  w.shell.position.y = H / 2;
     w.wall.scale.set(d.w, d.h, 1);          w.wall.position.y = d.h / 2;
     w.frame.position.y = fy;
-    w.spot.position.y = H - 0.2;  w.spot.target.position.set(0, fy, 0);
+    // AI 배치를 사용한 벽은 천장 높이가 바뀌어도 조명 30도 기하를 다시 계산합니다.
+    if (w.aiSpotEnabled) {
+      const aimY = clamp(w.aiSpotY, 0.2, Math.max(0.2, d.h - 0.2));
+      const aimX = clamp(w.aiSpotX, -d.w / 2, d.w / 2);
+      w.spot.position.set(aimX, H - 0.2, Math.max(0.5, (H - 0.2 - aimY) * Math.tan(Math.PI / 6)));
+      w.spot.target.position.set(aimX, aimY, 0);
+    } else {
+      w.spot.position.set(0, H - 0.2, 2.5);
+      w.spot.target.position.set(0, fy, 0);
+    }
     fitWallpaper(w);                                 // 벽지도 벽 크기에 맞춰 다시 배치
     layoutDeco(w);                                   // 기본 벽 장식도 벽 크기에 맞춰 다시 배치
     fitFrame(w, w.aspect);                           // 벽 크기에 맞춰 액자도 다시 맞춤
@@ -2166,10 +2255,13 @@ async function collectState() {                      // 지금 전시관 상태�
     frames: await Promise.all(frames.map(async f => ({
       type: f.item ? 'item' : f.kind === 'door' ? 'door' : 'frame', key: f.item ? f.kind : undefined,
       wall: f.i, x: num(f.group.position.x), y: num(f.group.position.y), w: num(f.fw), h: num(f.fh), name: f.name,
-      src: (f.item || f.kind === 'door') ? undefined : await imgToDataURL(f.src)
+      src: (f.item || f.kind === 'door') ? undefined : await imgToDataURL(f.src),
+      captionData: f.captionData ? aiWithoutArtist(f.captionData) : undefined
     }))),
     props: props.map(p => ({ kind: p.kind, label: p.label, name: p.name, w: num(p.w), h: num(p.h),
-      x: num(p.group.position.x), z: num(p.group.position.z), rot: num(p.group.rotation.y) }))
+      x: num(p.group.position.x), z: num(p.group.position.z), rot: num(p.group.rotation.y) })),
+    aiLights: walls.map(w => w.aiSpotEnabled ? { x: num(w.aiSpotX), y: num(w.aiSpotY) } : null),
+    aiArtworks: await Promise.all(mockArtworks.map(async a => ({...aiWithoutArtist(a), url:await imgToDataURL(a.url)})))
   };
   return data;
 }
@@ -2198,7 +2290,17 @@ function resetWallpaper(i) {                         // 내 벽지를 지우고 
 }
 
 function applyState(d) {                             // 저장된 내용으로 전시관 다시 만들기
+  aiUndoSnapshot = null;
+  $('aiUndoBtn').hidden = true;
+  $('aiResult').hidden = true;
   closeObj();  selectFrame(null);  selectProp(null);
+  // AI 분석 입력 데이터도 저장 파일에서 복원. 구 저장파일은 현재 예시 작품을 유지.
+  if (Array.isArray(d.aiArtworks) && d.aiArtworks.length >= 1 && d.aiArtworks.length <= 7) {
+    const valid = d.aiArtworks.every(a => a && typeof a.url==='string' &&
+      /^(data:image\/(jpeg|png|webp);base64,|https?:\/\/)/.test(a.url) &&
+      a.url.length<6000000 && Number(a.w)>0 && Number(a.h)>0);
+    if (valid) aiAssignDataset(d.aiArtworks.map(a => ({...a})), '저장된 작품 분석 데이터 복원 완료');
+  }
   // 1) 지금 있는 오브젝트 모두 지우고 번호 새로 시작
   [...frames].forEach(removeFrame);  [...props].forEach(removeProp);
   frameSeq = 0;  doorSeq = 0;
@@ -2206,6 +2308,12 @@ function applyState(d) {                             // 저장된 내용으로 �
   // 2) 벽 크기 · 상하연동
   d.dims.forEach((v, i) => { if (dims[i] && isFinite(v.w) && isFinite(v.h)) { dims[i].w = clamp(v.w, 0.01, 100);  dims[i].h = clamp(v.h, 0.01, 40); } });
   dims.forEach(x => x.h = dims[0].h);
+  walls.forEach((w, i) => {
+    const a = (d.aiLights || [])[i];
+    w.aiSpotEnabled = !!(a && Number.isFinite(a.x) && Number.isFinite(a.y));
+    w.aiSpotX = w.aiSpotEnabled ? a.x : 0;
+    w.aiSpotY = w.aiSpotEnabled ? a.y : 1.5;
+  });
   if (Array.isArray(d.link)) { link[0] = !!d.link[0];  link[1] = !!d.link[1]; }
   updateRoom();  selectWall(selWall);  saveDims();  saveLink();
   // 3) 바닥 · 천장
@@ -2229,6 +2337,7 @@ function applyState(d) {                             // 저장된 내용으로 �
       else if (o.type === 'frame') createFrame(w, h, o.name, o.src || undefined);
       else return;
       const f = frames[frames.length - 1];
+      if (o.type === 'frame' && o.captionData && typeof o.captionData === 'object') f.captionData = aiWithoutArtist(o.captionData);
       placeFrame(f, o.wall, o.x, o.y);
       if (f.entry && o.src && o.src.startsWith('data:')) f.entry.querySelector('span').textContent = '불러온 이미지';
     } finally { forceWall = null; }
@@ -2285,6 +2394,744 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+
+/* =====================================================================
+ * AI 자동 배치: 작품 이미지의 브라우저 CLIP 분석 또는 수동 메타데이터로 최적화.
+ * 이미지 분석 모델이 실패해도 수동 데이터 기반 배치 가능.
+ * ===================================================================== */
+const mockArtworks = [
+  { url:'https://picsum.photos/id/1015/1200/800', w:120, h:80, theme:'풍경', color:'차가움', weight:'무거움', title:'강변의 아침', year:'2026', desc:'자연의 고요함을 담은 풍경화', material:'유화' },
+  { url:'https://picsum.photos/id/1018/900/1200', w:90, h:120, theme:'풍경', color:'따뜻함', weight:'가벼움', title:'노을 지는 숲', year:'2025', desc:'따뜻한 색감으로 숲의 생동감을 표현', material:'아크릴물감' },
+  { url:'https://picsum.photos/id/1039/1200/900', w:120, h:90, theme:'인물', color:'차가움', weight:'무거움', title:'우울한 초상', year:'2026', desc:'푸른 톤이 강조된 인물화', material:'캔버스에 유채' },
+  { url:'https://picsum.photos/id/1043/1000/1000', w:100, h:100, theme:'추상', color:'따뜻함', weight:'가벼움', title:'기하학의 춤', year:'2026', desc:'역동적인 선과 면의 교차', material:'디지털 프린트' },
+  { url:'https://picsum.photos/id/1044/800/800', w:80, h:80, theme:'풍경', color:'차가움', weight:'가벼움', title:'바다의 파도', year:'2024', desc:'거친 파도의 질감을 사실적으로 묘사', material:'수채화' },
+  { url:'https://picsum.photos/id/1045/1400/900', w:140, h:90, theme:'추상', color:'따뜻함', weight:'무거움', title:'불의 리듬', year:'2026', desc:'강렬한 붉은 톤의 대형 추상화', material:'혼합 매체' }
+];
+const AI_SPACING = 0.15;          // 액자 바깥 테두리 사이 최소 간격: 15cm
+const AI_EYE_LEVEL = 1.5;        // 작품 중심의 목표 높이: 150cm
+let aiWorking = false;
+let aiUndoSnapshot = null;
+
+/* =======================================================================
+ * 실제 작품 이미지 분석: 브라우저에서 CLIP zero-shot 분류 실행 (별도 API 키 없음).
+ * 파일 이미지는 리사이즈한 data URL로 저장하여 3D 배치 / 갤러리 JSON 저장에 활용.
+ * 처음 분석시 모델 파일 다운로드가 필요하며 실패해도 수동 분류/배치는 계속 사용 가능.
+ * ======================================================================= */
+const AI_VISION_MODEL = 'Xenova/clip-vit-base-patch32';
+const AI_VISION_PACKAGE = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
+const AI_DEMO_ARTWORKS = mockArtworks.map(a => ({ ...a }));
+const AI_THEME_LABELS = [
+  { en:'landscape or nature', ko:'풍경' },
+  { en:'portrait or human figure', ko:'인물' },
+  { en:'abstract or geometric shapes', ko:'추상' },
+  { en:'still life of objects', ko:'정물' },
+  { en:'buildings or cityscape', ko:'도시' }
+];
+let aiDatasetRevision = 0;
+let aiClassifierPromise = null;
+let aiModelReady = false;
+let aiVisionRunning = false;
+let aiLastExportPlan = null;
+
+function aiDataChanged(message) {
+  aiDatasetRevision++;
+  aiCachedKey = '';
+  aiCachedPlans = null;
+  aiLastExportPlan = null;
+  $('aiPlanSummary').hidden = true;
+  $('aiExportBtn').hidden = true;
+  if (message) $('aiStatus').textContent = message;
+}
+// 과거 세이브 파일에 남아 있는 작가 정보도 표시하거나 다시 저장하지 않음.
+function aiWithoutArtist(obj) {
+  const cleaned = {...obj};
+  delete cleaned.artist;
+  return cleaned;
+}
+function aiAssignDataset(arts, message) {
+  if (!Array.isArray(arts) || arts.length < 1 || arts.length > 7)
+    throw new Error('작품은 1~7개까지 등록할 수 있습니다.');
+  mockArtworks.splice(0, mockArtworks.length, ...arts.map(aiWithoutArtist));
+  aiDataChanged(message);
+  aiRenderArtworkList();
+}
+function aiLoadImage(src) {
+  return new Promise((resolve,reject) => {
+    const im = new Image();
+    if (/^https?:/.test(src)) im.crossOrigin = 'anonymous';
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error('이미지를 읽을 수 없습니다.'));
+    im.src = src;
+  });
+}
+function aiCanvasForImage(im, maxSide) {
+  const k = Math.min(1, maxSide / Math.max(im.naturalWidth || im.width, im.naturalHeight || im.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round((im.naturalWidth || im.width) * k));
+  cv.height = Math.max(1, Math.round((im.naturalHeight || im.height) * k));
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  g.fillStyle = '#fff';
+  g.fillRect(0,0,cv.width,cv.height);
+  g.drawImage(im,0,0,cv.width,cv.height);
+  return cv;
+}
+function aiFileToArtwork(file,index) {
+  return new Promise((resolve,reject) => {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return reject(new Error('JPG/PNG/WebP 이미지만 사용할 수 있습니다.'));
+    if (file.size > 15*1024*1024) return reject(new Error(`${file.name}: 15MB 이하 파일만 사용할 수 있습니다.`));
+    const src = URL.createObjectURL(file);
+    aiLoadImage(src).then(im => {
+      const cv = aiCanvasForImage(im,1000);
+      URL.revokeObjectURL(src);
+      const ratio = cv.width/cv.height;
+      const w = Math.round((ratio >= 1 ? 120 : 120 * ratio)/5)*5;
+      const h = Math.round((ratio >= 1 ? 120/ratio : 120)/5)*5;
+      // 기본값은 이미지 비율만 반영한 예시 크기. 실제 출력 크기는 사용자가 입력.
+      const title = file.name.replace(/\.[^.]+$/,'').slice(0,60) || `작품 ${index+1}`;
+      resolve({url:cv.toDataURL('image/jpeg',0.86),w:Math.max(20,w),h:Math.max(20,h),
+        theme:'미분류',color:'중립',weight:'가벼움',title,year:'',
+        material:'',desc:'AI 분석 전 · 실제 작품 크기(cm) 확인 필요',
+        aiAnalysis:'미분석',aiConfidence:null,aiSizeExample:true,aiEditedDims:[]});
+    }).catch(e=>{ URL.revokeObjectURL(src);reject(e); });
+  });
+}
+
+function aiVisualStats(cv) {
+  const g=cv.getContext('2d',{willReadFrequently:true});
+  const {data}=g.getImageData(0,0,cv.width,cv.height);
+  let warm=0,cool=0,satTotal=0,brightness=0,lumaSq=0,n=0;
+  for(let i=0;i<data.length;i+=16) {  // 픽셀 4개마다 1회 표본
+    const r=data[i]/255, g=data[i+1]/255, b=data[i+2]/255;
+    const max=Math.max(r,g,b),min=Math.min(r,g,b),delta=max-min;
+    const light=(r+g+b)/3;
+    brightness+=light;lumaSq+=light*light;satTotal+=delta;
+    // 채도가 낮은 회색/흰색은 색온도 추정에서 가중치 감소
+    const w=delta * (0.5+light*0.5);
+    // 채도있는 R/Y 계열 / B/C 계열 대비, 녹색은 중립 처리
+    warm+=w*Math.max(0,r-b)*Math.max(0,1-Math.abs(g-r)*0.25);
+    cool+=w*Math.max(0,b-r);
+    n++;
+  }
+  const avg=brightness/Math.max(1,n),contrast=Math.sqrt(Math.max(0,lumaSq/Math.max(1,n)-avg*avg));
+  const vivid=satTotal/Math.max(1,n);
+  const rel=(warm-cool)/Math.max(0.001,warm+cool);
+  const color=(warm+cool < n*.014 || Math.abs(rel)<0.12) ? '중립' : (rel>0 ? '따뜻함' : '차가움');
+  return { color, averageBrightness:avg, contrast, saturation:vivid,
+    visualWeight: (1-avg)*0.5+contrast*0.8+vivid*0.5 };
+}
+function aiSuggestWeight(art,stats) {
+  // 실제 물리 무게가 아니라 면적·명암·채도로 추정한 시각적 무게
+  const area=art.w*art.h/10000;
+  return area*0.27+stats.visualWeight >= 0.55 ? '무거움' : '가벼움';
+}
+async function aiGetLocalClassifier() {
+  if (!aiClassifierPromise) {
+    aiClassifierPromise = (async()=>{
+      const {pipeline}=await import(AI_VISION_PACKAGE);
+      if (typeof pipeline!=='function') throw new Error('이미지 분석 모듈을 불러오지 못했습니다.');
+      const classifier=await pipeline('zero-shot-image-classification',AI_VISION_MODEL,
+        {device:'wasm',dtype:'q8'});
+      aiModelReady=true;
+      return classifier;
+    })().catch(e=>{aiClassifierPromise=null;aiModelReady=false;throw e;});
+  }
+  return aiClassifierPromise;
+}
+function aiFormField(name,value,field,kind,options) {
+  const lab=document.createElement('label');
+  lab.appendChild(document.createTextNode(name));
+  let input;
+  if (kind==='select') {
+    input=document.createElement('select');
+    for (const option of options) {const o=document.createElement('option');o.value=option;o.textContent=option;input.appendChild(o);}
+  } else {
+    input=document.createElement('input');
+    input.type=kind==='number'?'number':'text';
+    if (kind==='number') { input.min='10';input.max='500';input.step='1'; }
+    input.maxLength=120;
+  }
+  input.value=String(value??'');
+  input.dataset.aiField=field;
+  lab.appendChild(input);
+  return lab;
+}
+function aiRenderArtworkList() {
+  const target=$('aiArtList');target.replaceChildren();
+  mockArtworks.forEach((art,index)=>{
+    const card=document.createElement('div');card.className='aiArtItem';card.dataset.aiIndex=index;
+    const pic=document.createElement('img');pic.src=art.url;pic.alt=art.title;pic.loading='lazy';card.appendChild(pic);
+    const fields=document.createElement('div');fields.className='aiArtFields';
+    const title=aiFormField('작품 제목',art.title,'title','text');title.classList.add('aiFull');fields.appendChild(title);
+    fields.appendChild(aiFormField('가로 cm',art.w,'w','number'));
+    fields.appendChild(aiFormField('세로 cm',art.h,'h','number'));
+    fields.appendChild(aiFormField('주제 (AI 추정)',art.theme,'theme','select',['풍경','인물','추상','정물','도시','미분류']));
+    fields.appendChild(aiFormField('색온도 (계산)',art.color,'color','select',['따뜻함','차가움','중립']));
+    fields.appendChild(aiFormField('시각적 무게 (계산)',art.weight,'weight','select',['무거움','가벼움']));
+    const info=document.createElement('div');info.className='aiArtInfo';
+    const confidence=Number.isFinite(art.aiConfidence)?` (상대 점수 ${(art.aiConfidence*100).toFixed(0)}%)`:'';
+    info.textContent=`${art.aiAnalysis||'예시 데이터'}${confidence}${art.aiSizeExample?' · 크기 임시값':''}`;
+    fields.appendChild(info);card.appendChild(fields);target.appendChild(card);
+  });
+  $('aiImportNote').textContent=`현재 작품 ${mockArtworks.length}개 · ${mockArtworks.some(a=>a.aiSizeExample)?'크기는 이미지 비율 기준 임시값이므로 실제 cm로 수정하세요.':'작품 정보 수정 가능'}`;
+}
+function aiHandleFieldChange(e) {
+  const el=e.target;if (!el.dataset || !el.dataset.aiField) return;
+  const node=el.closest('[data-ai-index]'); if (!node) return;
+  const art=mockArtworks[Number(node.dataset.aiIndex)],key=el.dataset.aiField;
+  if (!art) return;
+  if (key==='w'||key==='h') {
+    const n=Number(el.value);if (!Number.isFinite(n)||n<10||n>500) {el.value=art[key];return;}
+    art[key]=n;
+    if (!Array.isArray(art.aiEditedDims)) art.aiEditedDims=[];
+    if (!art.aiEditedDims.includes(key)) art.aiEditedDims.push(key);
+    art.aiSizeExample=art.aiEditedDims.length<2;
+  } else {
+    art[key]=el.value.trim();
+    if (['theme','color','weight'].includes(key)) {art.aiAnalysis='분류 수동 보정';art.aiConfidence=null;}
+  }
+  aiDataChanged('작품 정보를 수정했습니다. 배치안을 다시 비교해주세요.');
+  const info=node.querySelector('.aiArtInfo');
+  if(info) info.textContent=(art.aiAnalysis||'수동 편집')+(Number.isFinite(art.aiConfidence)?` (상대 점수 ${(art.aiConfidence*100).toFixed(0)}%)`:'')+(art.aiSizeExample?' · 크기 임시값':'');
+}
+async function aiAnalyzeUploadedArtworks() {
+  if (aiVisionRunning || aiWorking) return;
+  aiVisionRunning=true; aiBusy(true);
+  const status=$('aiStatus');
+  try {
+    status.textContent='이미지 분석 모델을 준비하는 중입니다. 처음 실행하면 다운로드가 필요합니다.';
+    const classifier=await aiGetLocalClassifier();
+    for(let index=0;index<mockArtworks.length;index++) {
+      const art=mockArtworks[index];
+      status.textContent=`이미지 분석 중 ${index+1}/${mockArtworks.length}: ${art.title}`;
+      const im=await aiLoadImage(art.url);
+      const cv=aiCanvasForImage(im,224);
+      const scores=await classifier(cv,AI_THEME_LABELS.map(t=>t.en),
+        {hypothesis_template:'An artwork of {}.'});
+      if (!Array.isArray(scores)||!scores.length) throw new Error('모델이 분류 결과를 반환하지 않았습니다.');
+      const found=AI_THEME_LABELS.find(t=>t.en===scores[0].label);
+      art.theme=found?found.ko:'미분류';
+      art.aiConfidence=Number(scores[0].score)||0;
+      const stats=aiVisualStats(cv);
+      art.color=stats.color;
+      art.weight=aiSuggestWeight(art,stats);
+      art.aiAnalysis='CLIP 분석';
+      art.desc=`CLIP 주제 추정: ${art.theme}; 이미지 색온도: ${art.color}; 시각적 무게: ${art.weight}. 연도·실제 크기는 별도 확인 필요.`;
+      aiRenderArtworkList();
+    }
+    aiDataChanged('분석 완료! 결과를 확인·수정하고 4가지 배치안을 비교해보세요.');
+  } catch(e) {
+    console.error('CLIP 분석 실패',e);
+    status.textContent=`AI 분석을 완료하지 못했습니다: ${e.message}. 인터넷 연결을 확인하거나 아래 항목을 직접 수정해 배치하세요.`;
+  } finally {aiVisionRunning=false;aiBusy(false);}
+}
+function aiExportLayout() {
+  try {
+    const plans=aiCurrentPlans();
+    const payload={format:'gallery-ai-layout',version:1,exportedAt:new Date().toISOString(),
+      model:mockArtworks.some(a=>a.aiAnalysis==='CLIP 분석')?AI_VISION_MODEL:'manual-or-demo',
+      note:'imageUrl이 data URL인 경우 개인정보/이미지 용량을 줄이기 위해 제외됨',
+      artworks:mockArtworks.map((a,index)=>({id:index,title:a.title,year:a.year,
+        wCm:a.w,hCm:a.h,theme:a.theme,color:a.color,weight:a.weight,
+        analysis:a.aiAnalysis||'수동/예시',confidence:a.aiConfidence??null,
+        imageUrl:a.url.startsWith('data:')?null:a.url})),
+      plans:plans.map((p,index)=>p?({index,profile:AI_PROFILE_NAMES[index],score:p.score,gapCm:Math.round(p.gap*100),
+        placements:p.placements.map(q=>({artworkId:mockArtworks.indexOf(q.art),wallIndex:q.wallIndex,
+          uMeters:q.x,vMeters:q.y,outerWMeters:q.outerW,outerHMeters:q.outerH}))}):null)};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='AI_배치분석_좌표.json';
+    document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),2000);
+    $('aiStatus').textContent='좌표·작품 분석 JSON을 저장했습니다. (실제 이미지는 갤러리 세이브/로드에서 저장)';
+  } catch(e){$('aiStatus').textContent=e.message;}
+}
+$('aiFiles').addEventListener('change',async e=>{
+  const input=e.target,files=Array.from(input.files||[]);input.value='';
+  if(!files.length) return;
+  if(files.length>7){$('aiStatus').textContent='현재 최적화는 작품 7개까지 지원합니다. 7개 이하로 골라주세요.';return;}
+  aiBusy(true);
+  try {
+    $('aiStatus').textContent=`작품 이미지 ${files.length}개를 불러오는 중...`;
+    const arts=await Promise.all(files.map((f,i)=>aiFileToArtwork(f,i)));
+    aiAssignDataset(arts,`작품 ${arts.length}개 등록 완료. 실제 cm 크기를 확인하고 이미지 AI 분석을 눌러주세요.`);
+  }catch(e){$('aiStatus').textContent=`이미지를 불러오지 못했습니다: ${e.message}`;}
+  finally {aiBusy(false);}
+});
+$('aiAnalyzeBtn').addEventListener('click',aiAnalyzeUploadedArtworks);
+$('aiDemoBtn').addEventListener('click',()=>{
+  if(aiVisionRunning || aiWorking) return;
+  aiAssignDataset(AI_DEMO_ARTWORKS.map(a=>({...a})), '예시 작품 6개를 복원했습니다.');
+});
+$('aiArtList').addEventListener('change',aiHandleFieldChange);
+$('aiExportBtn').addEventListener('click',aiExportLayout);
+aiRenderArtworkList();
+
+
+function showAICaption(o) {
+  const box = $('aiCaptionBox');
+  if (!box) return;
+  const c = o && o.captionData;
+  box.hidden = !c;
+  box.replaceChildren();
+  if (!c) return;
+  const h = document.createElement('h4');
+  h.textContent = String(c.title || o.name || '작품 정보');
+  box.appendChild(h);
+  const rows = [
+    ['제작 연도', c.year], ['작품 크기', c.size ? `${c.size} cm` : ''], ['재료', c.material], ['분류 방식', c.aiAnalysis]
+  ];
+  for (const [label, value] of rows) {
+    const line = document.createElement('div'), strong = document.createElement('strong');
+    strong.textContent = `${label}: `;
+    line.append(strong, document.createTextNode(String(value || '정보 없음')));
+    box.appendChild(line);
+  }
+  if (c.desc) {
+    const desc = document.createElement('p');
+    desc.textContent = String(c.desc);  // 불러온 데이터도 HTML로 해석하지 않도록 안전하게 표시
+    box.appendChild(desc);
+  }
+}
+
+/* ===== 구 버전의 "벽 배정 전수 탐색 + 점수 평가 + 문 충돌 검사"를 통합 =====
+ * 입력 작품은 6개이므로 4^6=4096개의 배정 조합을 평가할 수 있습니다.
+ * 동일 벽 안에서는 실제 액자 테두리, 문/벽소품, 설치 높이까지 검사합니다.
+ * 태그는 예시·사용자 수동 입력·로컬 CLIP 분석 중 선택할 수 있습니다.
+ */
+const AI_WALL_MARGIN = 0.08;    // 벽 가장자리 8cm
+const AI_DOOR_CLEARANCE = 0.20; // 문·벽 장식과 액자 사이 20cm
+const AI_PROFILE_NAMES = [
+  '주제별 묶음', '색온도별 통일', '시각적 무게 균형', '형태 혼합·관람 흐름'
+];
+
+// fitFrame()과 같은 테두리 규격 (그림 + 매트 + 나무 프레임)
+function aiOuterSize(art) {
+  const imageW = art.w / 100, imageH = art.h / 100;
+  const scale = Math.min(1, imageW / 2);
+  const border = 2 * (0.12 + 0.14) * scale;
+  return { w: imageW + border, h: imageH + border };
+}
+function aiKind(art) {
+  const ratio = art.w / art.h;
+  return ratio > 1.08 ? '가로' : ratio < 0.92 ? '세로' : '정방형';
+}
+function aiMass(art) {
+  return (art.w * art.h / 10000) * (art.weight === '무거움' ? 1.5 : 1);
+}
+function aiGap() { return Number($('aiGapSelect').value) || AI_SPACING; }
+function aiIsDisplayArt(f) { return !f.item && f.kind !== 'door'; }
+
+function aiCenterHeight(wi, art) {
+  const outer = aiOuterSize(art), wallH = dims[wi].h;
+  const minY = outer.h / 2 + AI_WALL_MARGIN;
+  const maxY = wallH - minY;
+  if (minY > maxY + 1e-7) return null;
+  return clamp(AI_EYE_LEVEL, minY, maxY);
+}
+
+// 고정된 벽 소품/문만 장애물입니다. 기존 '일반 액자'는 적용 시 교체됩니다.
+function aiFreeWallSegments(wi, ordered, ys) {
+  const halfW = dims[wi].w / 2;
+  const bounds = [-halfW + AI_WALL_MARGIN, halfW - AI_WALL_MARGIN];
+  if (bounds[1] <= bounds[0]) return [];
+  const blocked = frames.filter(f => f.i === wi && (f.kind === 'door' || !!f.item))
+    .filter(f => ordered.some((art, k) => {
+      const h = aiOuterSize(art).h, cy = ys[k];
+      const fy = f.group.position.y;
+      return cy - h / 2 < fy + f.fh / 2 + AI_DOOR_CLEARANCE &&
+             cy + h / 2 > fy - f.fh / 2 - AI_DOOR_CLEARANCE;
+    }))
+    .map(f => ({
+      left: Math.max(bounds[0], f.group.position.x - f.fw / 2 - AI_DOOR_CLEARANCE),
+      right: Math.min(bounds[1], f.group.position.x + f.fw / 2 + AI_DOOR_CLEARANCE)
+    })).filter(o => o.right > o.left)
+    .sort((a, b) => a.left - b.left);
+  let cursor = bounds[0];
+  const free = [];
+  for (const obstacle of blocked) {
+    if (obstacle.left > cursor + 1e-7) free.push({ left: cursor, right: obstacle.left });
+    cursor = Math.max(cursor, obstacle.right);
+  }
+  if (cursor < bounds[1] - 1e-7) free.push({ left: cursor, right: bounds[1] });
+  return free;
+}
+
+function aiOrders(arts, profile) {
+  const key = profile === 0 ? 'theme' : profile === 1 ? 'color' : null;
+  const initial = arts.slice();
+  const byWidth = arts.slice().sort((a, b) => aiOuterSize(b).w - aiOuterSize(a).w);
+  const byTag = arts.slice().sort((a, b) =>
+    String(a[key] || aiKind(a)).localeCompare(String(b[key] || aiKind(b)), 'ko') || b.w - a.w);
+  const byMass = arts.slice().sort((a, b) => aiMass(b) - aiMass(a));
+  // 무거운 작품은 양쪽으로 분산해 벽면의 시각적 모멘트를 줄이는 후보도 만듭니다.
+  const spread = [];
+  byMass.forEach((a, i) => i % 2 ? spread.unshift(a) : spread.push(a));
+  const kindMix = [];
+  const kinds = ['가로', '세로', '정방형'].map(k => arts.filter(a => aiKind(a) === k));
+  let last = '';
+  while (kindMix.length < arts.length) {
+    const available = kinds.map((group, i) => ({ group, i, remaining: group.length }))
+      .filter(x => x.remaining).sort((a, b) => b.remaining - a.remaining);
+    const next = available.find(x => ['가로','세로','정방형'][x.i] !== last) || available[0];
+    kindMix.push(next.group.shift()); last = aiKind(kindMix[kindMix.length - 1]);
+  }
+  const base = [initial, initial.slice().reverse(), byTag, byTag.slice().reverse(),
+    byWidth, byWidth.slice().reverse(), spread, spread.slice().reverse(), kindMix];
+  const seen = new Set();
+  return base.filter(order => {
+    const sig = order.map(a => mockArtworks.indexOf(a)).join('.');
+    if (seen.has(sig)) return false;
+    seen.add(sig); return true;
+  });
+}
+
+// 한 벽의 작품들을 문 사이의 빈 구간으로 나누어 넣는 작은 조합 탐색.
+// 문이 있는 벽을 통째로 버리지 않고, 남는 좌/우 구간을 사용합니다.
+function aiPackOrder(wi, order, gap) {
+  if (!order.length) return { placements: [], quality: 0 };
+  const ys = order.map(a => aiCenterHeight(wi, a));
+  if (ys.some(y => y === null)) return null;
+  const segments = aiFreeWallSegments(wi, order, ys);
+  if (!segments.length) return null;
+  const sizes = order.map(aiOuterSize);
+  const groups = segments.map(() => []);
+  let best = null;
+
+  function commit() {
+    const placements = [];
+    let usedSegments = 0;
+    for (let si = 0; si < segments.length; si++) {
+      const indices = groups[si];
+      if (!indices.length) continue;
+      usedSegments++;
+      const total = indices.reduce((sum, ix) => sum + sizes[ix].w, 0) + gap * (indices.length - 1);
+      let x = (segments[si].left + segments[si].right - total) / 2;
+      for (const ix of indices) {
+        const size = sizes[ix];
+        placements.push({ art: order[ix], wallIndex: wi, x: x + size.w / 2,
+          y: ys[ix], outerW: size.w, outerH: size.h });
+        x += size.w + gap;
+      }
+    }
+    const totalMass = placements.reduce((v, p) => v + aiMass(p.art), 0);
+    const moment = placements.reduce((v, p) => v + p.x * aiMass(p.art), 0) / Math.max(0.01, totalMass);
+    // 문을 피해 적게 분절되고 한쪽으로 심하게 치우치지 않는 배치 선호.
+    const quality = -Math.abs(moment) * 1.8 - (usedSegments - 1) * 1.1;
+    if (!best || quality > best.quality) best = { placements, quality };
+  }
+  function dfs(index, firstSegment, totals) {
+    if (index === order.length) { commit(); return; }
+    for (let si = firstSegment; si < segments.length; si++) {
+      const extra = sizes[index].w + (groups[si].length ? gap : 0);
+      const available = segments[si].right - segments[si].left;
+      if (totals[si] + extra > available + 1e-7) continue;
+      groups[si].push(index); totals[si] += extra;
+      dfs(index + 1, si, totals);
+      groups[si].pop(); totals[si] -= extra;
+    }
+  }
+  dfs(0, 0, segments.map(() => 0));
+  return best;
+}
+
+function aiEvaluateWall(wi, mask, optionType, gap, cache) {
+  const key = `${wi}:${mask}:${optionType}:${gap}`;
+  if (cache.has(key)) return cache.get(key);
+  const selected = mockArtworks.filter((a, ix) => (mask & (1 << ix)) !== 0);
+  if (!selected.length) { const empty = { placements: [], quality: 0 }; cache.set(key, empty); return empty; }
+  let best = null;
+  for (const order of aiOrders(selected, optionType)) {
+    const candidate = aiPackOrder(wi, order, gap);
+    if (!candidate) continue;
+    // 같은 종류 작품들이 실제로 붙어 있을 때 점수를 조금 더 부여합니다.
+    const placements = candidate.placements.slice().sort((a,b) => a.x - b.x);
+    const type = optionType === 0 ? 'theme' : optionType === 1 ? 'color' : null;
+    let adjacent = 0;
+    for (let i = 1; i < placements.length; i++) {
+      if (optionType === 3) adjacent += aiKind(placements[i - 1].art) !== aiKind(placements[i].art) ? 2 : -1;
+      if (type) adjacent += placements[i-1].art[type] === placements[i].art[type] ? 1.5 : -0.7;
+    }
+    const score = candidate.quality + adjacent;
+    if (!best || score > best.quality) best = { placements: candidate.placements, quality: score };
+  }
+  cache.set(key, best);
+  return best;
+}
+
+function aiScoreLayout(optionType, placements, layouts, assignment) {
+  const used = layouts.filter(l => l.placements.length);
+  let score = used.length * (optionType === 3 ? 5 : 1.2);
+  for (const l of used) score += l.quality;
+  if (optionType === 0 || optionType === 1) {
+    const key = optionType === 0 ? 'theme' : 'color';
+    for (let i = 0; i < mockArtworks.length; i++) for (let j = i + 1; j < mockArtworks.length; j++) {
+      const sameTag = mockArtworks[i][key] === mockArtworks[j][key];
+      const sameWall = assignment[i] === assignment[j];
+      score += sameTag ? (sameWall ? 15 : -4) : (sameWall ? -6 : 0);
+    }
+  } else if (optionType === 2) {
+    // 각 벽의 시각적 무게 분산 + 같은 벽에서 좌우 모멘트 균형.
+    const total = mockArtworks.reduce((v, a) => v + aiMass(a), 0);
+    const ideal = total / Math.max(1, used.length);
+    for (const l of used) {
+      const mass = l.placements.reduce((v, p) => v + aiMass(p.art), 0);
+      score -= Math.pow(mass - ideal, 2) * 2.5;
+      const moment = l.placements.reduce((v, p) => v + p.x * aiMass(p.art), 0);
+      score -= Math.abs(moment) * 2.5;
+    }
+    for (let i=0; i<mockArtworks.length; i++) for (let j=i+1; j<mockArtworks.length; j++) {
+      if (mockArtworks[i].weight === '무거움' && mockArtworks[j].weight === '무거움') {
+        score += assignment[i] === assignment[j] ? -7 : 5;
+      }
+    }
+  } else {
+    // 관람 흐름(북->동->남->서)의 연속 작품에서 가로·세로·정방형 혼합 유도.
+    const route = placements.slice().sort((a,b) => a.wallIndex-b.wallIndex || a.x-b.x);
+    for (let i=1; i<route.length; i++) {
+      score += aiKind(route[i-1].art) === aiKind(route[i].art) ? -2 : 6;
+      if (route[i-1].wallIndex !== route[i].wallIndex) score += 1;
+    }
+  }
+  // 기존 알고리즘의 preferredWall 개념: 조합 동점일 때 벽 방향을 약하게 선호.
+  score += assignment.reduce((v, wi, ix) => v + ((wi + 4 - (optionType + ix) % 4) % 4) * -0.025, 0);
+  return score;
+}
+
+function aiValidateOptimizedPlan(plan, gap) {
+  const errors = [];
+  const byWall = [[],[],[],[]];
+  for (const p of plan.placements) {
+    const d = dims[p.wallIndex], hw=p.outerW/2, hh=p.outerH/2;
+    if (p.x-hw < -d.w/2+AI_WALL_MARGIN-1e-6 ||
+        p.x+hw > d.w/2-AI_WALL_MARGIN+1e-6 ||
+        p.y-hh < AI_WALL_MARGIN-1e-6 || p.y+hh > d.h-AI_WALL_MARGIN+1e-6) {
+      errors.push(`${p.art.title}: 벽 범위 초과`);
+    }
+    for (const f of frames.filter(o => o.i === p.wallIndex && (o.kind === 'door' || o.item))) {
+      const ox = f.group.position.x, oy=f.group.position.y;
+      if (Math.abs(p.x-ox) < hw+f.fw/2+AI_DOOR_CLEARANCE-1e-6 &&
+          Math.abs(p.y-oy) < hh+f.fh/2+AI_DOOR_CLEARANCE-1e-6) {
+        errors.push(`${p.art.title}: ${f.name}과 충돌`);
+      }
+    }
+    byWall[p.wallIndex].push(p);
+  }
+  for (const wall of byWall) for (let i=0; i<wall.length; i++) for (let j=i+1; j<wall.length; j++) {
+    const a=wall[i], b=wall[j];
+    const overlapY = Math.abs(a.y-b.y) < (a.outerH+b.outerH)/2 - 1e-6;
+    if (overlapY && Math.abs(a.x-b.x) < (a.outerW+b.outerW)/2+gap-1e-6)
+      errors.push(`${a.art.title} / ${b.art.title}: 작품 사이 간격 부족`);
+  }
+  if (plan.placements.length !== mockArtworks.length) errors.push('일부 작품이 배치되지 않았습니다.');
+  return errors;
+}
+
+function aiOptimizePlans(gap) {
+  if (!(gap >= 0.15 && gap <= 2)) throw new Error('작품 간격 설정이 올바르지 않습니다.');
+  const count = mockArtworks.length;
+  // 조합 폭발 방지: 작품이 늘어나면 상한을 안내합니다.
+  if (count < 1 || count > 7) throw new Error('현재 최적화는 1~7개 작품을 지원합니다.');
+  const profiles = Array.from({ length:4 }, () => []);
+  const cache = new Map(), nCases = Math.pow(4, count);
+  for (let optionType = 0; optionType < 4; optionType++) {
+    const top = profiles[optionType];
+    for (let caseNo=0; caseNo<nCases; caseNo++) {
+      let remaining=caseNo;
+      const assignment = [], masks=[0,0,0,0];
+      for (let ix=0; ix<count; ix++) {
+        const wi=remaining%4; remaining=Math.floor(remaining/4);
+        assignment.push(wi); masks[wi] |= 1 << ix;
+      }
+      const layouts = masks.map((mask,wi) => aiEvaluateWall(wi,mask,optionType,gap,cache));
+      if (layouts.some(l => !l)) continue;
+      const placements = layouts.flatMap(l => l.placements);
+      const score = aiScoreLayout(optionType, placements, layouts, assignment);
+      if (top.length >= 16 && score < top[top.length-1].score) continue;
+      const candidate={ optionType, gap, assignment, placements, score,
+        signature: assignment.join(','), wallCount: layouts.filter(l=>l.placements.length).length };
+      // 본래 검증 로직과 동일하게 실제 좌표로 재검증.
+      if (aiValidateOptimizedPlan(candidate, gap).length) continue;
+      top.push(candidate);
+      top.sort((a,b)=>b.score-a.score);
+      if (top.length > 16) top.pop();
+    }
+  }
+  const signatures = new Set();
+  const plans = profiles.map((candidates,index) => {
+    const picked = candidates.find(p => !signatures.has(p.signature)) || candidates[0];
+    if (picked) signatures.add(picked.signature);
+    return picked || null;
+  });
+  return plans;
+}
+
+// 네 방식 간 점수는 서로 다른 평가 함수이므로 숫자로 직접 우열을 비교하지 않습니다.
+function aiPlanDescription(plan) {
+  if (!plan) return '해당 기준으로 가능한 배치를 찾지 못했습니다.';
+  const wallsUsed = [0,1,2,3].filter(i => plan.placements.some(p => p.wallIndex === i));
+  const short = wallsUsed.map(i =>
+    `${WALLS[i].name}: ${plan.placements.filter(p => p.wallIndex===i).sort((a,b)=>a.x-b.x).map(p => p.art.title).join(', ')}`);
+  return short;
+}
+let aiCachedPlans = null;
+let aiCachedKey = '';
+function aiStateKey() {
+  const obstacles = frames.filter(f => f.kind === 'door' || f.item)
+    .map(f => [f.i, f.kind, f.fw, f.fh, f.group.position.x, f.group.position.y].join(','));
+  return JSON.stringify([aiGap(), dims.map(d=>[d.w,d.h]), obstacles, aiDatasetRevision]);
+}
+function aiCurrentPlans() {
+  const key = aiStateKey();
+  if (aiCachedKey !== key || !aiCachedPlans) {
+    aiCachedPlans = aiOptimizePlans(aiGap());
+    aiCachedKey = key;
+  }
+  return aiCachedPlans;
+}
+function aiComparePlans() {
+  const target = $('aiPlanSummary');
+  target.replaceChildren();
+  try {
+    const plans = aiCurrentPlans();
+    plans.forEach((plan, i) => {
+      const row=document.createElement('div'); row.className='aiPlanRow';
+      const heading=document.createElement('b');
+      heading.textContent = `안 ${i+1}. ${AI_PROFILE_NAMES[i]}`;
+      row.appendChild(heading);
+      const detail=document.createElement('span');
+      detail.textContent = plan
+        ? `각 방식 내부 평가점수 ${plan.score.toFixed(1)}점 · 사용 벽 ${plan.wallCount}면 · 작품 ${plan.placements.length}개`
+        : '배치 불가능';
+      row.appendChild(detail);
+      const description=document.createElement('small');
+      const result=aiPlanDescription(plan);
+      description.textContent = Array.isArray(result) ? result.join(' / ') : result;
+      row.appendChild(description); target.appendChild(row);
+    });
+    target.hidden=false;
+    $('aiExportBtn').hidden = !plans.some(Boolean);
+    $('aiStatus').textContent='가능한 벽 조합을 검사했어요. (방식별 점수는 직접 비교할 수 없어요.)';
+  } catch (error) {
+    $('aiStatus').textContent=`배치안 검토 실패: ${error.message}`;
+  }
+}
+function setAILight(i, x, y) {
+  const w = walls[i];
+  w.aiSpotEnabled = true;
+  w.aiSpotX = x;
+  w.aiSpotY = y;
+  const diff = roomH - 0.2 - y;
+  w.spot.position.set(x, roomH - 0.2, Math.max(0.5, diff * Math.tan(Math.PI / 6)));
+  w.spot.target.position.set(x, y, 0);
+}
+function clearAILights() {
+  walls.forEach((w, i) => {
+    w.aiSpotEnabled = false;
+    w.spot.position.set(0, roomH - 0.2, 2.5);
+    w.spot.target.position.set(0, Math.min(FRAME_Y, dims[i].h * 0.55), 0);
+  });
+}
+function toggleAILayoutBox(open) {
+  $('aiLayoutBox').hidden = !open;
+  $('aiLayoutBtn').setAttribute('aria-expanded', String(open));
+  $('aiLayoutBtn').classList.toggle('on', open);
+  if (open) $('aiStatus').textContent = '';
+}
+function aiBusy(on) {
+  aiWorking = on;
+  $('aiLayoutBox').querySelectorAll('button,input[type=file]').forEach(b => b.disabled = on);
+}
+async function applyAILayout(optionType) {
+  if (aiWorking) return;
+  const status = $('aiStatus');
+  let plan;
+  try {
+    plan = aiCurrentPlans()[optionType];
+    if (!plan) throw new Error('현재 벽 길이와 문 위치에서 이 배치안을 만들 수 없습니다.');
+    const problems = aiValidateOptimizedPlan(plan, aiGap());
+    if (problems.length) throw new Error(problems.join(' / '));
+  } catch (e) { status.textContent = e.message; return; }
+
+  const oldArt = frames.filter(aiIsDisplayArt);
+  if (oldArt.length && !confirm(`기존 일반 액자 ${oldArt.length}개가 새 AI 배치로 교체됩니다. 계속할까요?`)) return;
+
+  aiBusy(true);
+  status.textContent = '이전 배치를 백업하는 중...';
+  let snapshot;
+  try {
+    snapshot = await collectState();
+    selectFrame(null);
+    oldArt.forEach(removeFrame);
+    clearAILights();
+
+    for (const item of plan.placements) {
+      const { art, wallIndex, x, y } = item;
+      forceWall = wallIndex;
+      try { createFrame(art.w, art.h, art.title, art.url); }
+      finally { forceWall = null; }
+      const f = frames[frames.length - 1];
+      f.captionData = {
+        title: art.title, year: art.year,
+        size: `${art.w}×${art.h}`, material: art.material, desc: art.desc,
+        aiAnalysis: art.aiAnalysis || '예시/수동', aiConfidence: art.aiConfidence ?? null
+      };
+      placeFrame(f, wallIndex, x, y);
+      // 실제 표시 좌표가 최적화 좌표와 일치하는지 확인.
+      if (Math.abs(f.group.position.x - x) > 1e-5 || Math.abs(f.group.position.y - y) > 1e-5) {
+        throw new Error(`${art.title}의 배치 좌표가 예상과 다릅니다.`);
+      }
+    }
+    // 사용 벽마다 해당 벽의 작품 무게중심을 향해 30도 조명 설정.
+    for (let wi=0; wi<4; wi++) {
+      const assigned=plan.placements.filter(p=>p.wallIndex===wi);
+      if (!assigned.length) continue;
+      const mass=assigned.reduce((v,p)=>v+aiMass(p.art),0);
+      const aimX=assigned.reduce((v,p)=>v+p.x*aiMass(p.art),0)/mass;
+      const aimY=assigned.reduce((v,p)=>v+p.y*aiMass(p.art),0)/mass;
+      setAILight(wi,aimX,aimY);
+    }
+    selectFrame(null);
+    aiUndoSnapshot = snapshot;
+    $('aiUndoBtn').hidden = false;
+    $('aiResult').textContent =
+      `AI ${AI_PROFILE_NAMES[optionType]} 완료 · ${plan.placements.length}개 작품 · ${plan.wallCount}개 벽 · 액자 간격 최소 ${Math.round(plan.gap*100)}cm · 배치 내부 점수 ${plan.score.toFixed(1)}점`;
+    $('aiResult').hidden = false;
+    toggleAILayoutBox(false);
+  } catch (e) {
+    console.error('AI 배치 오류', e);
+    if (snapshot) {
+      try { applyState(snapshot); }
+      catch (restoreError) { console.error('이전 전시관 복구 오류', restoreError); }
+    }
+    status.textContent = `배치에 실패했습니다: ${e.message}`;
+  } finally {
+    forceWall = null;
+    aiBusy(false);
+  }
+}
+$('aiCompareBtn').addEventListener('click', aiComparePlans);
+$('aiGapSelect').addEventListener('change', () => {
+  $('aiPlanSummary').hidden = true;
+  $('aiStatus').textContent = '간격이 바뀌었습니다. 배치안 미리 비교를 다시 눌러주세요.';
+});
+$('aiLayoutBtn').addEventListener('click', () => toggleAILayoutBox($('aiLayoutBox').hidden));
+$('aiCloseBtn').addEventListener('click', () => toggleAILayoutBox(false));
+$('aiLayoutBox').querySelectorAll('[data-ai-option]').forEach(button => {
+  button.addEventListener('click', () => applyAILayout(Number(button.dataset.aiOption)));
+});
+$('aiUndoBtn').addEventListener('click', () => {
+  if (aiWorking || !aiUndoSnapshot) return;
+  const previous = aiUndoSnapshot;
+  try {
+    applyState(previous);
+    toggleAILayoutBox(false);
+  } catch (e) {
+    console.error(e);
+    $('aiStatus').textContent = '이전 배치를 복원하는 중 오류가 발생했습니다.';
+  }
+});
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('aiLayoutBox').hidden) toggleAILayoutBox(false);
+});
+
 </script>
 </body>
 </html>
