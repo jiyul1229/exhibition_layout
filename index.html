@@ -116,6 +116,17 @@
   #aiLayoutBox { position: fixed; z-index: 1000; top: 16px; left: 50%; transform: translateX(-50%);
     width: min(364px, calc(100vw - 32px)); box-sizing: border-box; max-height: calc(100vh - 32px);
     overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
+  /* 화면이 낮은 태블릿에서도 내용이 사라지지 않고 대화상자 내부가 스크롤됩니다. */
+  #aiLayoutBox > * { flex-shrink: 0; }
+  #aiPlanSummary:not([hidden]) {
+    flex: 0 0 auto;
+    height: clamp(220px, 42vh, 380px);
+    min-height: 220px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
   #aiLayoutBox h3 { margin: 0; font-size: 17px; text-align: center; }
   #aiLayoutBox > .hint { text-align: center; }
   #aiLayoutBox .mbtn { width: 100%; box-shadow: none; font-size: 13px; padding: 11px 8px; text-align: left; }
@@ -124,12 +135,26 @@
   #aiStatus { min-height: 16px; margin: 0; color: #475f50; font-size: 12px; text-align: center; }
   .aiControls { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; }
   .aiControls select { flex:1; min-width:0; padding:7px; font-size:13px; border:1px solid #aaa; background:#fff; border-radius:3px; }
-  #aiPlanSummary { max-height:240px; overflow:auto; background:#fff; border:1px solid #d9d9d9;
+  #aiPlanSummary { max-height:420px; overflow:auto; background:#fff; border:1px solid #d9d9d9;
     border-radius:4px; padding:9px; font-size:12px; line-height:1.55; }
   #aiPlanSummary .aiPlanRow { border-bottom:1px solid #e7e7e7; padding:6px 0; }
   #aiPlanSummary .aiPlanRow:last-child { border-bottom:0; }
   #aiPlanSummary b { display:block; color:#284738; }
   #aiPlanSummary small { display:block; color:#666; }
+  .aiPlanPreview { width:100%; height:auto; display:block; margin:6px 0; border:1px solid #e2e6e2;
+    border-radius:5px; background:#fafbf9; }
+  #aiLayoutBox .aiApplyPreview { padding:6px 10px; margin-top:4px; background:#e5eee7;
+    color:#244434; text-align:center; }
+  #aiDragWarning { position:fixed; z-index:1100; left:50%; bottom:72px;
+    transform:translateX(-50%); max-width:min(490px,calc(100vw - 28px));
+    padding:9px 14px; border:1px solid #b4884d; border-radius:7px;
+    background:#fff9e9; box-shadow:0 3px 16px rgba(0,0,0,.2);
+    color:#63451c; text-align:center; font-size:13px; font-weight:650;
+    pointer-events:none; }
+  .aiArtItem .aiArtActions { grid-column:1/-1; display:flex; gap:5px; flex-wrap:wrap; }
+  #aiLayoutBox .aiArtActions .mbtn { font-size:11px; padding:5px 6px; width:auto; flex:1; text-align:center; }
+  .aiArtInfo.aiNeedsReview { color:#8c521e; font-weight:650; }
+
 
   /* 실제 업로드 이미지 + 브라우저 CLIP 분석: 데이터 편집 패널 */
   #aiArtList { display:flex; flex-direction:column; gap:7px; max-height:260px; overflow:auto;
@@ -196,7 +221,7 @@
     <p class="hint" id="saveMsg" hidden></p>
   </div>
   <p class="hint" id="aiResult" hidden></p>
-  <p class="hint" id="help">드래그: 둘러보기 / 휠: 확대·축소 / 방향키(WASD): 이동</p>
+  <p class="hint" id="help">드래그: 둘러보기·액자 이동 / 휠·두 손가락: 확대·축소 / WASD: 이동</p>
 </div>
 
 <!-- 우측 상단: 오브젝트 버튼 → 목록에서 오브젝트 선택 → 크기 입력 → [생성]을 눌러야 만들어짐 -->
@@ -229,7 +254,7 @@
 <!-- AI 배치안 선택 창 (보낸 샘플 코드의 네 가지 배치 방식을 적용) -->
 <div id="aiLayoutBox" class="panel" hidden role="dialog" aria-label="AI 자동 배치 시스템">
   <h3>AI 자동 배치 시스템</h3>
-  <p class="hint">업로드 이미지 분석 결과 또는 예시 작품으로 배치 후보를 탐색합니다. 문·벽 크기·간격을 검증하고 문과 소품은 유지됩니다.</p>
+  <p class="hint">업로드 이미지 분석 결과 또는 예시 작품으로 배치 후보를 탐색합니다. 눈높이 150cm를 기본으로 하며, 큰 액자는 나무 벽 장식에 겹치지 않도록 높이를 자동 조절합니다. 문·벽 크기·간격도 검증합니다.</p>
   <div style="border-top:1px solid #d5d6d3;padding-top:8px;display:flex;flex-direction:column;gap:6px">
     <strong style="font-size:13px">1. 실제 작품 이미지 불러오기 · 분석</strong>
     <input type="file" id="aiFiles" accept="image/jpeg,image/png,image/webp" multiple aria-label="분석할 작품 이미지 선택">
@@ -238,14 +263,14 @@
       <button class="mbtn" id="aiAnalyzeBtn">이미지 AI 분석 (CLIP)</button>
       <button class="mbtn" id="aiDemoBtn">예시 작품 복원</button>
     </div>
-    <p class="hint">CLIP 모델은 처음 사용할 때 인터넷에서 내려받아 이 기기에서 분석합니다. 주제를 추정하며 색온도·시각적 무게는 이미지 통계로 계산합니다. 분석 결과는 직접 수정할 수 있습니다.</p>
+    <p class="hint">CLIP 모델은 처음 사용할 때 인터넷에서 내려받아 이 기기에서 분석합니다. 주제 분류의 상대 점수가 낮거나 2위와 비슷하면 검토 필요로 표시합니다. 수동으로 수정한 값은 재분석해도 유지됩니다.</p>
     <div id="aiArtList" aria-label="작품 정보 편집" aria-live="polite"></div>
   </div>
   <strong style="font-size:13px">2. 자동 배치 최적화</strong>
   <label class="aiControls" for="aiGapSelect"><span>액자 사이 간격</span>
     <select id="aiGapSelect"><option value="0.15">15cm (기존)</option><option value="0.40">40cm (넓은 간격)</option></select>
   </label>
-  <button class="mbtn" id="aiCompareBtn">4개 배치안 미리 비교 (공간·문 충돌 검증)</button>
+  <button class="mbtn" id="aiCompareBtn">4개 배치안 그림으로 비교 (문·공간 검증)</button>
   <div id="aiPlanSummary" hidden aria-live="polite"></div>
   <button class="mbtn" id="aiExportBtn" hidden>배치 결과 JSON 다운로드 (좌표·분석 정보)</button>
   <button class="mbtn" data-ai-option="0">안 1. 주제 및 테마별 묶음 배치</button>
@@ -256,6 +281,8 @@
   <p id="aiStatus" role="status" aria-live="polite"></p>
   <button class="mbtn aiClose" id="aiCloseBtn">닫기</button>
 </div>
+
+<div id="aiDragWarning" role="status" aria-live="polite" hidden></div>
 
 <!-- 우측 하단: 나침반 (북=붉은 N. 지금 바라보는 방향이 위쪽의 작은 삼각형 쪽) -->
 <div id="compass" aria-label="나침반">
@@ -911,7 +938,10 @@ function placeFrame(f, wi, u, v) {                   // 액자를 wi번 벽의 (
   const hw = f.item ? f.fw / 2 : f.bars[0].scale.x / 2, hh = f.item ? f.fh / 2 : f.bars[2].scale.y / 2 + f.bars[0].scale.y;           // 액자 바깥 절반 크기
   const ux = Math.max(0, d.w / 2 - hw);
   const lo = f.kind === 'door' ? f.fh / 2 : Math.min(hh, d.h / 2), hi = f.kind === 'door' ? f.fh / 2 : Math.max(d.h - hh, d.h / 2);   // 문은 바닥에 붙어 높이 고정
-  f.group.position.set(clamp(u, -ux, ux), clamp(v, lo, hi), 0.004);
+  // 저장 파일 복원·액자 크기 수정·벽 크기 변경에도 목재 패널/몰딩 침범을 방지합니다.
+  // AI 배치뿐 아니라 모든 일반 액자 이동에 동일한 하단 안전선을 적용합니다.
+  const safeLo = (!f.item && f.kind !== 'door') ? Math.max(lo, aiSafeBottom(wi) + hh) : lo;
+  f.group.position.set(clamp(u, -ux, ux), clamp(v, Math.min(safeLo, hi), hi), 0.004);
 }
 
 let forceWall = null;                                // 세이브 파일을 불러오는 동안만 쓰는 '이 벽에 만들어라' 지정
@@ -955,7 +985,11 @@ function createFrame(wCm, hCm, name, src) {                     // 오브젝트1
   group.userData.frame = f;
   const n = frames.filter(o => o.i === wi).length;   // 같은 벽에 여러 개면 겹치지 않게 조금씩 옆으로
   frames.push(f);
-  placeFrame(f, wi, ((n % 5) - 2) * 0.5, Math.min(FRAME_Y, d.h * 0.55));
+  // 수동으로 처음 액자를 생성할 때도 나무 패널을 침범하지 않도록 외곽 높이를 반영.
+  fitFrame(f, f.aspect);
+  const outerHalfH = (f.bars[2].scale.y + f.bars[0].scale.y) / 2;
+  const safeCenter = Math.max(Math.min(FRAME_Y, d.h * 0.55), aiSafeBottom(wi) + outerHalfH);
+  placeFrame(f, wi, ((n % 5) - 2) * 0.5, safeCenter);
   // 이미지 선택 패널의 '액자이미지' 목록에 이 액자 전용 버튼 추가
   const up = makeUpload('', '기본 이미지', url => loadFrameImage(f, url));
   up.label.querySelector('b').textContent = f.title;   // 이름은 textContent로 넣어 안전하게 표시
@@ -1604,7 +1638,35 @@ let dragFrame = null, dragProp = null;  const grab = { x: 0, y: 0 };            
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
 const aim = e => { ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); };
 const wallOk = i => walls[i].group.visible && alphas[i] > 0.5;     // 보이는(투명해지지 않은) 벽만 대상
+// 터치 두 점을 추적: 두 손가락으로 확대할 때 한 손가락이 액자를 끌지 않도록 분리.
+const aiTouchPointers = new Map();
+let aiPinchLastDistance = null;
+let aiPinchBlocked = false;
+function aiTouchDistance() {
+  if (aiTouchPointers.size < 2) return null;
+  const [a,b] = [...aiTouchPointers.values()].slice(0,2);
+  return Math.hypot(a.x-b.x,a.y-b.y);
+}
+function aiApplyPinchZoom(ratio) {
+  // 손가락 사이가 넓어지면 zoom 배율 / 화각이 작아져 확대됩니다.
+  if (!(ratio > 0) || !Number.isFinite(ratio)) return;
+  if (mode === 'center') userFov=clamp(userFov/ratio,35,85);
+  else if (mode === 'top') orbit.zoom=clamp(orbit.zoom/ratio,0.2,1.4);
+  else if (mode === 'wall') view2D.zoom=clamp(view2D.zoom/ratio,0.15,1.6);
+}
 canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch') {
+    aiTouchPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if (aiTouchPointers.size >= 2) {
+      aiPinchBlocked=true;
+      aiPinchLastDistance=aiTouchDistance();
+      dragging=false; dragFrame=dragProp=null;
+      aiHideDragWarning();
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (aiPinchBlocked) return;
+  }
   lastX = e.clientX; lastY = e.clientY;
   canvas.setPointerCapture(e.pointerId);
   aim(e);
@@ -1627,6 +1689,16 @@ canvas.addEventListener('pointerdown', e => {
   } else { selectFrame(null); selectProp(null); dragging = true; }     // 아니면 기존처럼 둘러보기
 });
 canvas.addEventListener('pointermove', e => {
+  if (e.pointerType === 'touch' && aiTouchPointers.has(e.pointerId)) {
+    aiTouchPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if (aiTouchPointers.size >= 2) {
+      const distance=aiTouchDistance();
+      if (distance && aiPinchLastDistance) aiApplyPinchZoom(distance/aiPinchLastDistance);
+      aiPinchLastDistance=distance;
+      return;
+    }
+    if (aiPinchBlocked) return;
+  }
   if (dragProp) {                                    // 바닥 위로 끌어 옮기기
     aim(e);
     const h = ray.intersectObject(floor)[0];
@@ -1639,7 +1711,12 @@ canvas.addEventListener('pointermove', e => {
     if (h) {
       const wi = walls.findIndex(w => w.wall === h.object), p = walls[wi].group.worldToLocal(h.point.clone());
       const same = wi === dragFrame.i;
-      placeFrame(dragFrame, wi, p.x + (same ? grab.x : 0), p.y + (same ? grab.y : 0));
+      const result=aiCheckManualFrameMove(dragFrame,wi,p.x+(same?grab.x:0),p.y+(same?grab.y:0));
+      if (result.valid) {
+        placeFrame(dragFrame,wi,result.x,result.y);
+        aiHideDragWarning();
+      } else aiShowDragWarning(result.reason);
+
     }
     return;
   }
@@ -1650,7 +1727,14 @@ canvas.addEventListener('pointermove', e => {
   else if (mode === 'top') { orbit.yaw -= dx * 0.005; orbit.pitch = clamp(orbit.pitch + dy * 0.005, 0.12, 1.5); }   // 3D: 끌면 방 둘레를 돌며 봄
   else if (mode === 'wall') { view2D.px -= dx * view2D.wpp; view2D.py += dy * view2D.wpp; }                        // 2D: 끄는 방향으로 벽면이 따라 움직임
 });
-['pointerup', 'pointercancel'].forEach(ev => canvas.addEventListener(ev, () => { dragging = false; dragFrame = dragProp = null; }));
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => canvas.addEventListener(ev, e => {
+  if (e.pointerType === 'touch') {
+    aiTouchPointers.delete(e.pointerId);
+    if (aiTouchPointers.size < 2) aiPinchLastDistance=null;
+    if (!aiTouchPointers.size) aiPinchBlocked=false;
+  }
+  dragging=false; dragFrame=dragProp=null; aiHideDragWarning();
+}));
 
 /* ---------- 2D오브젝트: 벽에 붙는 오브젝트 10종 (2D 벽면 보기에서만 메뉴에 나타남) ----------
  * 액자·문과 똑같이 '벽 그룹의 자식'이라 끌어서 옮기고(다른 벽으로도), 수정·삭제할 수 있어요.
@@ -2555,6 +2639,17 @@ function aiFormField(name,value,field,kind,options) {
   lab.appendChild(input);
   return lab;
 }
+function aiInfoForArtwork(art) {
+  const tags=[art.aiAnalysis || '예시 데이터'];
+  if (Number.isFinite(art.aiConfidence)) {
+    tags.push(`AI 추천 ${art.aiModelTheme || art.theme}: 상대 점수 ${(art.aiConfidence*100).toFixed(0)}%`);
+    if (Number.isFinite(art.aiScoreMargin)) tags.push(`2위와 차이 ${(art.aiScoreMargin*100).toFixed(0)}%p`);
+  }
+  if (art.aiNeedsReview) tags.push('⚠ 분류 확인 권장');
+  if (art.aiEditedFields && art.aiEditedFields.length) tags.push(`수동 보정 유지 (${art.aiEditedFields.join(', ')})`);
+  if (art.aiSizeExample) tags.push('크기 임시값');
+  return tags.join(' · ');
+}
 function aiRenderArtworkList() {
   const target=$('aiArtList');target.replaceChildren();
   mockArtworks.forEach((art,index)=>{
@@ -2568,9 +2663,24 @@ function aiRenderArtworkList() {
     fields.appendChild(aiFormField('색온도 (계산)',art.color,'color','select',['따뜻함','차가움','중립']));
     fields.appendChild(aiFormField('시각적 무게 (계산)',art.weight,'weight','select',['무거움','가벼움']));
     const info=document.createElement('div');info.className='aiArtInfo';
-    const confidence=Number.isFinite(art.aiConfidence)?` (상대 점수 ${(art.aiConfidence*100).toFixed(0)}%)`:'';
-    info.textContent=`${art.aiAnalysis||'예시 데이터'}${confidence}${art.aiSizeExample?' · 크기 임시값':''}`;
-    fields.appendChild(info);card.appendChild(fields);target.appendChild(card);
+    info.textContent=aiInfoForArtwork(art);
+    if (art.aiNeedsReview) info.classList.add('aiNeedsReview');
+    fields.appendChild(info);
+    const actions=document.createElement('div');actions.className='aiArtActions';
+    const retry=document.createElement('button'); retry.type='button';retry.className='mbtn';
+    retry.textContent='이 작품만 재분석';retry.disabled=aiWorking||aiVisionRunning;
+    retry.addEventListener('click',()=>aiAnalyzeSingleArtwork(index));actions.appendChild(retry);
+    if (art.aiEditedFields && art.aiEditedFields.length) {
+      const reset=document.createElement('button');reset.type='button';reset.className='mbtn';
+      reset.textContent='수동 보정 해제';reset.disabled=aiWorking||aiVisionRunning;
+      reset.addEventListener('click',()=>{
+        art.aiEditedFields=[];
+        aiDataChanged('수동 보정을 해제했어요. AI로 다시 분석하려면 재분석 버튼을 눌러주세요.');
+        aiRenderArtworkList();
+      });
+      actions.appendChild(reset);
+    }
+    fields.appendChild(actions);card.appendChild(fields);target.appendChild(card);
   });
   $('aiImportNote').textContent=`현재 작품 ${mockArtworks.length}개 · ${mockArtworks.some(a=>a.aiSizeExample)?'크기는 이미지 비율 기준 임시값이므로 실제 cm로 수정하세요.':'작품 정보 수정 가능'}`;
 }
@@ -2587,42 +2697,74 @@ function aiHandleFieldChange(e) {
     art.aiSizeExample=art.aiEditedDims.length<2;
   } else {
     art[key]=el.value.trim();
-    if (['theme','color','weight'].includes(key)) {art.aiAnalysis='분류 수동 보정';art.aiConfidence=null;}
+    if (['theme','color','weight'].includes(key)) {
+      if (!Array.isArray(art.aiEditedFields)) art.aiEditedFields=[];
+      if (!art.aiEditedFields.includes(key)) art.aiEditedFields.push(key);
+      art.aiAnalysis=Number.isFinite(art.aiConfidence)?'CLIP 분석 + 수동 보정':'수동 보정';
+    }
   }
   aiDataChanged('작품 정보를 수정했습니다. 배치안을 다시 비교해주세요.');
-  const info=node.querySelector('.aiArtInfo');
-  if(info) info.textContent=(art.aiAnalysis||'수동 편집')+(Number.isFinite(art.aiConfidence)?` (상대 점수 ${(art.aiConfidence*100).toFixed(0)}%)`:'')+(art.aiSizeExample?' · 크기 임시값':'');
+  aiRenderArtworkList();
+}
+// 상대 점수는 후보 주제 사이의 값이며, 정답일 확률을 보장하지 않습니다.
+async function aiAnalyzeOneArtwork(art,classifier) {
+  const im=await aiLoadImage(art.url);
+  const cv=aiCanvasForImage(im,224);
+  const scores=await classifier(cv,AI_THEME_LABELS.map(t=>t.en),
+    {hypothesis_template:'An artwork of {}.'});
+  if(!Array.isArray(scores)||!scores.length) throw new Error('모델이 분류 결과를 반환하지 않았습니다.');
+  const ranked=scores.slice().sort((a,b)=>Number(b.score)-Number(a.score));
+  const best=ranked[0];const runner=ranked[1];
+  const found=AI_THEME_LABELS.find(t=>t.en===best.label);
+  const suggested=found?found.ko:'미분류';
+  const score=Number(best.score)||0, margin=score-(Number(runner?.score)||0);
+  art.aiModelTheme=suggested; art.aiConfidence=score; art.aiScoreMargin=margin;
+  // 실제 신뢰도 확률이 아니라 검토를 위한 보수적 휴리스틱.
+  art.aiNeedsReview=score<0.45 || margin<0.12;
+  const overrides=new Set(art.aiEditedFields||[]);
+  if(!overrides.has('theme')) art.theme=suggested;
+  const stats=aiVisualStats(cv);
+  if(!overrides.has('color')) art.color=stats.color;
+  if(!overrides.has('weight')) art.weight=aiSuggestWeight(art,stats);
+  art.aiAnalysis=overrides.size?'CLIP 분석 + 수동 보정':'CLIP 분석';
+  art.desc=`CLIP 주제 추천: ${suggested}${art.aiNeedsReview?' (분류 확인 권장)':''}; 이미지 색온도: ${stats.color}; 시각적 무게 추정. 실제 크기는 직접 확인 필요.`;
+}
+async function aiAnalyzeSingleArtwork(index) {
+  if (aiVisionRunning||aiWorking) return;
+  const art=mockArtworks[index];if(!art) return;
+  aiVisionRunning=true;aiBusy(true);
+  try {
+    $('aiStatus').textContent=`${art.title}: 모델 준비·재분석 중...`;
+    const classifier=await aiGetLocalClassifier();
+    await aiAnalyzeOneArtwork(art,classifier);
+    aiDataChanged(`${art.title}: 재분석 완료. 수동 보정은 유지했어요.`);
+  } catch(e) {
+    console.error('개별 AI 분석 실패',e);
+    $('aiStatus').textContent=`재분석 실패: ${e.message}`;
+  } finally {
+    aiVisionRunning=false;aiBusy(false);aiRenderArtworkList();
+  }
 }
 async function aiAnalyzeUploadedArtworks() {
   if (aiVisionRunning || aiWorking) return;
-  aiVisionRunning=true; aiBusy(true);
+  aiVisionRunning=true;aiBusy(true);
   const status=$('aiStatus');
   try {
-    status.textContent='이미지 분석 모델을 준비하는 중입니다. 처음 실행하면 다운로드가 필요합니다.';
+    status.textContent='이미지 분석 모델 준비 중입니다. 최초 실행 때 다운로드가 필요합니다.';
     const classifier=await aiGetLocalClassifier();
     for(let index=0;index<mockArtworks.length;index++) {
       const art=mockArtworks[index];
       status.textContent=`이미지 분석 중 ${index+1}/${mockArtworks.length}: ${art.title}`;
-      const im=await aiLoadImage(art.url);
-      const cv=aiCanvasForImage(im,224);
-      const scores=await classifier(cv,AI_THEME_LABELS.map(t=>t.en),
-        {hypothesis_template:'An artwork of {}.'});
-      if (!Array.isArray(scores)||!scores.length) throw new Error('모델이 분류 결과를 반환하지 않았습니다.');
-      const found=AI_THEME_LABELS.find(t=>t.en===scores[0].label);
-      art.theme=found?found.ko:'미분류';
-      art.aiConfidence=Number(scores[0].score)||0;
-      const stats=aiVisualStats(cv);
-      art.color=stats.color;
-      art.weight=aiSuggestWeight(art,stats);
-      art.aiAnalysis='CLIP 분석';
-      art.desc=`CLIP 주제 추정: ${art.theme}; 이미지 색온도: ${art.color}; 시각적 무게: ${art.weight}. 연도·실제 크기는 별도 확인 필요.`;
+      await aiAnalyzeOneArtwork(art,classifier);
       aiRenderArtworkList();
     }
-    aiDataChanged('분석 완료! 결과를 확인·수정하고 4가지 배치안을 비교해보세요.');
+    aiDataChanged('분석 완료! ⚠ 표시가 있으면 분류를 검토하고 배치안을 비교해보세요.');
   } catch(e) {
     console.error('CLIP 분석 실패',e);
-    status.textContent=`AI 분석을 완료하지 못했습니다: ${e.message}. 인터넷 연결을 확인하거나 아래 항목을 직접 수정해 배치하세요.`;
-  } finally {aiVisionRunning=false;aiBusy(false);}
+    status.textContent=`AI 분석을 완료하지 못했습니다: ${e.message}. 인터넷을 확인하거나 직접 분류하세요.`;
+  } finally {
+    aiVisionRunning=false;aiBusy(false);aiRenderArtworkList();
+  }
 }
 function aiExportLayout() {
   try {
@@ -2633,6 +2775,8 @@ function aiExportLayout() {
       artworks:mockArtworks.map((a,index)=>({id:index,title:a.title,year:a.year,
         wCm:a.w,hCm:a.h,theme:a.theme,color:a.color,weight:a.weight,
         analysis:a.aiAnalysis||'수동/예시',confidence:a.aiConfidence??null,
+        aiSuggestedTheme:a.aiModelTheme||null,reviewSuggested:!!a.aiNeedsReview,
+        manuallyAdjustedFields:a.aiEditedFields||[],
         imageUrl:a.url.startsWith('data:')?null:a.url})),
       plans:plans.map((p,index)=>p?({index,profile:AI_PROFILE_NAMES[index],score:p.score,gapCm:Math.round(p.gap*100),
         placements:p.placements.map(q=>({artworkId:mockArtworks.indexOf(q.art),wallIndex:q.wallIndex,
@@ -2719,10 +2863,28 @@ function aiMass(art) {
 function aiGap() { return Number($('aiGapSelect').value) || AI_SPACING; }
 function aiIsDisplayArt(f) { return !f.item && f.kind !== 'door'; }
 
+// 기본 벽 아랫부분(웨인스코팅·레일)의 실제 3D 크기를 확인합니다.
+// 벽지를 사용하거나 목재 패널이 없는 스타일에서는 나무 패널 여유를 적용하지 않습니다.
+const AI_RAIL_CLEARANCE = 0.12; // 나무 장식/몰딩 위로 액자 외곽까지 12cm 여유
+function aiWallDecorTop(wi) {
+  const w = walls[wi];
+  if (!w || !w.deco || !w.deco.group.visible) return 0;
+  const k = w.deco.parts;
+  // 걸레받이는 모든 벽 스타일에 남기 때문에 패널이 없어도 걸리지 않도록 검사.
+  let top = k.base.visible ? k.base.position.y + k.base.scale.y / 2 : 0;
+  if (k.wains.visible) top = Math.max(top, k.wains.position.y + k.wains.scale.y / 2);
+  if (k.rail.visible) top = Math.max(top, k.rail.position.y + k.rail.scale.y / 2);
+  return top;
+}
+function aiSafeBottom(wi) {
+  const decorTop = aiWallDecorTop(wi);
+  return decorTop > 0 ? Math.max(AI_WALL_MARGIN, decorTop + AI_RAIL_CLEARANCE) : AI_WALL_MARGIN;
+}
 function aiCenterHeight(wi, art) {
   const outer = aiOuterSize(art), wallH = dims[wi].h;
-  const minY = outer.h / 2 + AI_WALL_MARGIN;
-  const maxY = wallH - minY;
+  // 눈높이 150cm를 우선하고, 키 큰 액자만 하단 장식 위로 자동 보정.
+  const minY = aiSafeBottom(wi) + outer.h / 2;
+  const maxY = wallH - AI_WALL_MARGIN - outer.h / 2;
   if (minY > maxY + 1e-7) return null;
   return clamp(AI_EYE_LEVEL, minY, maxY);
 }
@@ -2895,6 +3057,41 @@ function aiScoreLayout(optionType, placements, layouts, assignment) {
   return score;
 }
 
+// 수동으로 액자·벽 소품·문을 끌 때 실제 보이는 외곽을 이용해 충돌을 막습니다.
+function aiFrameBounds(f) {
+  if (f.item || f.kind==='door') return { w:f.fw,h:f.fh };
+  return {w:f.bars[0].scale.x,h:f.bars[2].scale.y+f.bars[0].scale.y};
+}
+function aiShowDragWarning(message) {
+  const el=$('aiDragWarning');
+  el.textContent=`이동 불가: ${message}`;el.hidden=false;
+}
+function aiHideDragWarning() {
+  const el=$('aiDragWarning');if(el) el.hidden=true;
+}
+function aiCheckManualFrameMove(frame,wi,u,v) {
+  if (!frame || !dims[wi]) return {valid:false,reason:'해당 벽이 없습니다.'};
+  const d=dims[wi],size=aiFrameBounds(frame),hw=size.w/2,hh=size.h/2;
+  const maxX=Math.max(0,d.w/2-hw);
+  const y=frame.kind==='door'?frame.fh/2:clamp(v,Math.min(hh,d.h/2),Math.max(d.h-hh,d.h/2));
+  const x=clamp(u,-maxX,maxX);
+  if (hw > d.w/2+1e-6 || hh>d.h/2+1e-6)
+    return {valid:false,reason:'벽보다 큰 오브젝트입니다.'};
+  if (frame.kind !== 'door' && !frame.item && y-hh < aiSafeBottom(wi)-1e-6)
+    return {valid:false,reason:'액자 아래쪽이 벽 나무 장식과 겹칩니다. 작품을 조금 올려주세요.'};
+  for(const other of frames) {
+    if(other===frame || other.i!==wi) continue;
+    const os=aiFrameBounds(other);
+    const clearance=(frame.kind==='door'||other.kind==='door'||frame.item||other.item)
+      ? AI_DOOR_CLEARANCE : aiGap();
+    const overlapX=Math.abs(x-other.group.position.x)<hw+os.w/2+clearance-1e-6;
+    const overlapY=Math.abs(y-other.group.position.y)<hh+os.h/2+clearance-1e-6;
+    if(overlapX&&overlapY)
+      return {valid:false,reason:`${other.name||'다른 오브젝트'}과(와) 겹치거나 최소 간격이 부족합니다.`};
+  }
+  return {valid:true,x,y};
+}
+
 function aiValidateOptimizedPlan(plan, gap) {
   const errors = [];
   const byWall = [[],[],[],[]];
@@ -2905,6 +3102,8 @@ function aiValidateOptimizedPlan(plan, gap) {
         p.y-hh < AI_WALL_MARGIN-1e-6 || p.y+hh > d.h-AI_WALL_MARGIN+1e-6) {
       errors.push(`${p.art.title}: 벽 범위 초과`);
     }
+    if (p.y - hh < aiSafeBottom(p.wallIndex) - 1e-6)
+      errors.push(`${p.art.title}: 벽 하단 목재 패널/몰딩과 겹침`);
     for (const f of frames.filter(o => o.i === p.wallIndex && (o.kind === 'door' || o.item))) {
       const ox = f.group.position.x, oy=f.group.position.y;
       if (Math.abs(p.x-ox) < hw+f.fw/2+AI_DOOR_CLEARANCE-1e-6 &&
@@ -2976,7 +3175,8 @@ let aiCachedKey = '';
 function aiStateKey() {
   const obstacles = frames.filter(f => f.kind === 'door' || f.item)
     .map(f => [f.i, f.kind, f.fw, f.fh, f.group.position.x, f.group.position.y].join(','));
-  return JSON.stringify([aiGap(), dims.map(d=>[d.w,d.h]), obstacles, aiDatasetRevision]);
+  return JSON.stringify([aiGap(), dims.map(d=>[d.w,d.h]), obstacles,
+    dims.map((_, wi) => Number(aiWallDecorTop(wi).toFixed(4))), aiDatasetRevision]);
 }
 function aiCurrentPlans() {
   const key = aiStateKey();
@@ -2985,6 +3185,53 @@ function aiCurrentPlans() {
     aiCachedKey = key;
   }
   return aiCachedPlans;
+}
+// 벽별 정면 축소도: 배치안 적용 전에 네 벽의 실제 좌표를 작은 그림으로 확인.
+function aiWallPreview(plan) {
+  const NS='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(NS,'svg');
+  svg.setAttribute('viewBox','0 0 344 154');
+  svg.setAttribute('class','aiPlanPreview');
+  svg.setAttribute('role','img');
+  svg.setAttribute('aria-label','북·동·남·서 각 벽의 작품과 문 배치 미리보기');
+  const add=(tag,attrs,content,parent=svg)=>{
+    const el=document.createElementNS(NS,tag);
+    Object.entries(attrs||{}).forEach(([key,value])=>el.setAttribute(key,String(value)));
+    if(content!==undefined && content!==null) el.textContent=String(content);
+    parent.appendChild(el);return el;
+  };
+  const colors=['#53786c','#6881a3','#9b8064','#7b7296'];
+  for(let wi=0;wi<4;wi++) {
+    const d=dims[wi],baseY=8+wi*36,x0=52,W=284,H=27;
+    add('text',{x:3,y:baseY+16,'font-size':10,fill:'#45564c'},['북','동','남','서'][wi]);
+    add('rect',{x:x0,y:baseY,width:W,height:H,rx:2,fill:'#f1f3f0',stroke:'#b8c3b9','stroke-width':0.8});
+    const decorTop=aiWallDecorTop(wi);
+    if (decorTop > 0) {
+      const trimTop=baseY+(d.h-decorTop)/d.h*H;
+      add('rect',{x:x0,y:trimTop,width:W,height:Math.max(0,baseY+H-trimTop),fill:'#ba9d7a'});
+      add('line',{x1:x0,y1:trimTop,x2:x0+W,y2:trimTop,stroke:'#75553e','stroke-width':1});
+    }
+    const box=(centerX,centerY,width,height,fill,stroke,label)=>{
+      const xx=x0+(centerX-width/2+d.w/2)/d.w*W;
+      const ww=Math.max(1,width/d.w*W);
+      const yy=baseY+(d.h-centerY-height/2)/d.h*H;
+      const hh=Math.max(1,height/d.h*H);
+      const r=add('rect',{x:xx,y:yy,width:ww,height:hh,rx:1,
+        fill,stroke,'stroke-width':0.7});
+      add('title',{},label,r);
+      return {xx,yy,ww,hh};
+    };
+    frames.filter(f=>f.i===wi && (f.kind==='door'||f.item)).forEach(f=>{
+      box(f.group.position.x,f.group.position.y,f.fw,f.fh,'#d5d8d7','#8e9c97',`${f.name} (고정)`);
+    });
+    plan.placements.filter(p=>p.wallIndex===wi).forEach(p=>{
+      const r=box(p.x,p.y,p.outerW,p.outerH,colors[wi],'#26372f',p.art.title);
+      if(r.ww>12&&r.hh>8) add('text',{x:r.xx+r.ww/2,y:r.yy+r.hh/2+2,
+        'font-size':8,'text-anchor':'middle',fill:'#fff'},String(mockArtworks.indexOf(p.art)+1));
+    });
+    add('text',{x:334,y:baseY+36,'text-anchor':'end','font-size':7,fill:'#69726b'},`${d.w.toFixed(2)}m`);
+  }
+  return svg;
 }
 function aiComparePlans() {
   const target = $('aiPlanSummary');
@@ -3004,9 +3251,21 @@ function aiComparePlans() {
       const description=document.createElement('small');
       const result=aiPlanDescription(plan);
       description.textContent = Array.isArray(result) ? result.join(' / ') : result;
-      row.appendChild(description); target.appendChild(row);
+      row.appendChild(description);
+      if(plan) {
+        row.appendChild(aiWallPreview(plan));
+        const caption=document.createElement('small');
+        caption.textContent='숫자는 작품 목록 순서, 회색은 문·벽 소품입니다. 그림은 벽면 정면 축소도입니다.';
+        row.appendChild(caption);
+        const apply=document.createElement('button');apply.type='button';apply.className='mbtn aiApplyPreview';
+        apply.textContent=`안 ${i+1} 바로 적용`;
+        apply.addEventListener('click',()=>applyAILayout(i));row.appendChild(apply);
+      }
+      target.appendChild(row);
     });
     target.hidden=false;
+    target.scrollTop=0; // 4개 배치안 중 항상 1안부터 확인
+    target.scrollIntoView({ block:'nearest', inline:'nearest' });
     $('aiExportBtn').hidden = !plans.some(Boolean);
     $('aiStatus').textContent='가능한 벽 조합을 검사했어요. (방식별 점수는 직접 비교할 수 없어요.)';
   } catch (error) {
