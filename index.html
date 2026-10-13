@@ -254,7 +254,7 @@
 <!-- AI 배치안 선택 창 (보낸 샘플 코드의 네 가지 배치 방식을 적용) -->
 <div id="aiLayoutBox" class="panel" hidden role="dialog" aria-label="AI 자동 배치 시스템">
   <h3>AI 자동 배치 시스템</h3>
-  <p class="hint">업로드 이미지 분석 결과 또는 예시 작품으로 배치 후보를 탐색합니다. 눈높이 150cm를 기본으로 하며, 큰 액자는 나무 벽 장식에 겹치지 않도록 높이를 자동 조절합니다. 문·벽 크기·간격도 검증합니다.</p>
+  <p class="hint">업로드 이미지 분석 결과 또는 예시 작품으로 배치 후보를 탐색합니다. 작품 중심을 벽 높이의 중간보다 조금 위(55%)에 거는 것을 기본으로 하며, 큰 액자는 나무 벽 장식에 겹치지 않도록 높이를 자동 조절합니다. 문·벽 크기·간격도 검증합니다.</p>
   <div style="border-top:1px solid #d5d6d3;padding-top:8px;display:flex;flex-direction:column;gap:6px">
     <strong style="font-size:13px">1. 실제 작품 이미지 불러오기 · 분석</strong>
     <input type="file" id="aiFiles" accept="image/jpeg,image/png,image/webp" multiple aria-label="분석할 작품 이미지 선택">
@@ -2492,7 +2492,7 @@ const mockArtworks = [
   { url:'https://picsum.photos/id/1045/1400/900', w:140, h:90, theme:'추상', color:'따뜻함', weight:'무거움', title:'불의 리듬', year:'2026', desc:'강렬한 붉은 톤의 대형 추상화', material:'혼합 매체' }
 ];
 const AI_SPACING = 0.15;          // 액자 바깥 테두리 사이 최소 간격: 15cm
-const AI_EYE_LEVEL = 1.5;        // 작품 중심의 목표 높이: 150cm
+const AI_CENTER_RATIO = 0.55;    // 작품 중심의 목표 높이: 벽 높이의 55% (중간보다 조금 위)
 let aiWorking = false;
 let aiUndoSnapshot = null;
 
@@ -2882,11 +2882,11 @@ function aiSafeBottom(wi) {
 }
 function aiCenterHeight(wi, art) {
   const outer = aiOuterSize(art), wallH = dims[wi].h;
-  // 눈높이 150cm를 우선하고, 키 큰 액자만 하단 장식 위로 자동 보정.
+  // 천장과 바닥의 중간보다 조금 위를 우선하고, 키 큰 액자만 하단 장식 위/천장 아래로 자동 보정.
   const minY = aiSafeBottom(wi) + outer.h / 2;
   const maxY = wallH - AI_WALL_MARGIN - outer.h / 2;
   if (minY > maxY + 1e-7) return null;
-  return clamp(AI_EYE_LEVEL, minY, maxY);
+  return clamp(wallH * AI_CENTER_RATIO, minY, maxY);
 }
 
 // 고정된 벽 소품/문만 장애물입니다. 기존 '일반 액자'는 적용 시 교체됩니다.
