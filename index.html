@@ -1412,7 +1412,8 @@ function updateRoom() {
     const d = dims[i], fy = Math.min(FRAME_Y, d.h * 0.55);   // 낮은 벽이면 액자도 낮춤
     w.group.position.set(layout[i][0], 0, layout[i][1]);
     w.shell.scale.set(layout[i][2], H, 1);  w.shell.position.y = H / 2;
-    w.wall.scale.set(d.w, d.h, 1);          w.wall.position.y = d.h / 2;
+    w.visW = layout[i][2];  w.visH = H;              // 벽지는 방 끝까지 꽉 차게 (액자 배치 범위는 dims 그대로)
+    w.wall.scale.set(w.visW, w.visH, 1);    w.wall.position.y = w.visH / 2;
     w.frame.position.y = fy;
     // AI 배치를 사용한 벽은 천장 높이가 바뀌어도 조명 30도 기하를 다시 계산합니다.
     if (w.aiSpotEnabled) {
@@ -1524,8 +1525,9 @@ function makeUpload(title, defaultText, onPick) {
 const wpBlobs = [], wpStatus = [];
 
 // 벽지를 벽 비율에 맞춰 '꽉 채우기(cover)': 이미지가 늘어나지 않고 넘치는 부분만 잘림
+function wallVis(w) { return { w: w.visW || dims[w.i].w, h: w.visH || dims[w.i].h }; }   // 벽지·장식이 실제로 덮는 크기(방 한 면 전체)
 function layoutDeco(w) {                             // 기본 벽 장식을 벽 크기에 맞춰 배치 (패널 높이는 최대 1m)
-  const d = dims[w.i], k = w.deco.parts;
+  const d = wallVis(w), k = w.deco.parts;
   const wh = Math.min(1.0, d.h * 0.28), bb = Math.min(0.12, wh * 0.18), rl = Math.min(0.06, wh * 0.1), ch = Math.min(0.18, d.h * 0.06);
   k.wains.scale.set(d.w, wh, 1);              k.wains.position.set(0, wh / 2, 0.003);
   w.deco.wainTex.repeat.set(Math.max(0.05, d.w / 0.8), 1);          // 패널 한 칸 약 80cm
@@ -1537,8 +1539,9 @@ function layoutDeco(w) {                             // 기본 벽 장식을 벽
 function fitWallpaper(w) {
   const tex = w.wall.material.map;
   if (!tex) return;
-  if (!w.hasWp) { const d = dims[w.i], t = WALL_STYLES[curWall].tile;  tex.repeat.set(d.w / t, d.h / t);  tex.offset.set(0, 0);  return; }   // 벽 스타일 무늬: 벽 크기에 맞춰 반복(한 칸 크기는 스타일마다 다름)
-  const A = dims[w.i].w / dims[w.i].h, I = w.wpAspect;       // A: 벽 비율, I: 이미지 비율
+  const d = wallVis(w);
+  if (!w.hasWp) { const t = WALL_STYLES[curWall].tile;  tex.repeat.set(d.w / t, d.h / t);  tex.offset.set(0, 0);  return; }   // 벽 스타일 무늬: 벽 크기에 맞춰 반복(한 칸 크기는 스타일마다 다름)
+  const A = d.w / d.h, I = w.wpAspect;       // A: 벽 비율, I: 이미지 비율
   if (I > A) { tex.repeat.set(A / I, 1); tex.offset.set((1 - A / I) / 2, 0); }
   else       { tex.repeat.set(1, I / A); tex.offset.set(0, (1 - I / A) / 2); }
 }
