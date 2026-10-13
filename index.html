@@ -258,12 +258,12 @@
   <div style="border-top:1px solid #d5d6d3;padding-top:8px;display:flex;flex-direction:column;gap:6px">
     <strong style="font-size:13px">1. 실제 작품 이미지 불러오기 · 분석</strong>
     <input type="file" id="aiFiles" accept="image/jpeg,image/png,image/webp" multiple aria-label="분석할 작품 이미지 선택">
-    <p class="hint" id="aiImportNote">예시 작품 6개로 시작합니다. 이미지 1~7개를 선택하면 교체됩니다. 작품의 실제 cm 크기는 직접 입력해야 합니다.</p>
+    <p class="hint" id="aiImportNote">예시 작품 6개로 시작합니다. 이미지를 고르면 예시 작품 대신 들어가고, 다시 고르면 목록에 추가됩니다(최대 7개). 작품의 실제 cm 크기는 직접 입력해야 합니다.</p>
     <div class="aiMiniActions">
-      <button class="mbtn" id="aiAnalyzeBtn">이미지 AI 분석 (CLIP)</button>
+      <button class="mbtn" id="aiAnalyzeBtn">이미지 AI 분석 (CLIP 임베딩·섹션)</button>
       <button class="mbtn" id="aiDemoBtn">예시 작품 복원</button>
     </div>
-    <p class="hint">CLIP 모델은 처음 사용할 때 인터넷에서 내려받아 이 기기에서 분석합니다. 주제 분류의 상대 점수가 낮거나 2위와 비슷하면 검토 필요로 표시합니다. 수동으로 수정한 값은 재분석해도 유지됩니다.</p>
+    <p class="hint">CLIP 모델은 처음 사용할 때 인터넷에서 내려받아 이 기기에서 분석합니다. 작품별 이미지 임베딩의 코사인 유사도로 섹션을 자동으로 나누고, 섹션은 목록에서 직접 바꿀 수 있습니다. 주제 라벨은 섹션 이름에 쓰입니다. 주제 분류의 상대 점수가 낮거나 2위와 비슷하면 검토 필요로 표시합니다. 수동으로 수정한 값은 재분석해도 유지됩니다.</p>
     <div id="aiArtList" aria-label="작품 정보 편집" aria-live="polite"></div>
   </div>
   <strong style="font-size:13px">2. 자동 배치 최적화</strong>
@@ -273,7 +273,7 @@
   <button class="mbtn" id="aiCompareBtn">4개 배치안 그림으로 비교 (문·공간 검증)</button>
   <div id="aiPlanSummary" hidden aria-live="polite"></div>
   <button class="mbtn" id="aiExportBtn" hidden>배치 결과 JSON 다운로드 (좌표·분석 정보)</button>
-  <button class="mbtn" data-ai-option="0">안 1. 주제 및 테마별 묶음 배치</button>
+  <button class="mbtn" data-ai-option="0">안 1. CLIP 유사도 섹션별 묶음 배치</button>
   <button class="mbtn" data-ai-option="1">안 2. 색온도(시각적 분위기) 통일 배치</button>
   <button class="mbtn" data-ai-option="2">안 3. 시각적 무게 균형 배치</button>
   <button class="mbtn" data-ai-option="3">안 4. 형태 혼합 및 관람 흐름 배치</button>
@@ -2386,7 +2386,14 @@ function applyState(d) {                             // 저장된 내용으로 �
     const valid = d.aiArtworks.every(a => a && typeof a.url==='string' &&
       /^(data:image\/(jpeg|png|webp);base64,|https?:\/\/)/.test(a.url) &&
       a.url.length<6000000 && Number(a.w)>0 && Number(a.h)>0);
-    if (valid) aiAssignDataset(d.aiArtworks.map(a => ({...a})), '저장된 작품 분석 데이터 복원 완료');
+    if (valid) {
+      // 되돌리기처럼 같은 작품 목록이 돌아오면 이미 계산한 임베딩을 이어 씀
+      const prev = mockArtworks.map(a => ({ title:a.title, w:a.w, h:a.h, embedding:a.embedding }));
+      aiAssignDataset(d.aiArtworks.map(a => ({...a})), '저장된 작품 분석 데이터 복원 완료');
+      if (prev.length === mockArtworks.length && mockArtworks.every((a, i) => a.title === prev[i].title && a.w === prev[i].w && a.h === prev[i].h))
+        mockArtworks.forEach((a, i) => { if (prev[i].embedding) a.embedding = prev[i].embedding; });
+      aiRecomputeEmbeddings();                       // 빠진 임베딩만 다시 계산 (세이브 파일에는 없음)
+    }
   }
   // 1) 지금 있는 오브젝트 모두 지우고 번호 새로 시작
   [...frames].forEach(removeFrame);  [...props].forEach(removeProp);
@@ -2530,15 +2537,22 @@ function aiDataChanged(message) {
   if (message) $('aiStatus').textContent = message;
 }
 // 과거 세이브 파일에 남아 있는 작가 정보도 표시하거나 다시 저장하지 않음.
+// CLIP 임베딩도 세이브 파일에 넣지 않음 (불러온 뒤 다시 계산).
 function aiWithoutArtist(obj) {
   const cleaned = {...obj};
   delete cleaned.artist;
+  delete cleaned.embedding;
   return cleaned;
 }
-function aiAssignDataset(arts, message) {
+// keepEmbeddings: 이미 메모리에 있는 작품을 다시 넣을 때(추가·삭제) 계산해 둔 임베딩을 유지
+function aiAssignDataset(arts, message, keepEmbeddings) {
   if (!Array.isArray(arts) || arts.length < 1 || arts.length > 7)
     throw new Error('작품은 1~7개까지 등록할 수 있습니다.');
-  mockArtworks.splice(0, mockArtworks.length, ...arts.map(aiWithoutArtist));
+  mockArtworks.splice(0, mockArtworks.length, ...arts.map(a =>
+    keepEmbeddings && a.embedding ? { ...aiWithoutArtist(a), embedding:a.embedding } : aiWithoutArtist(a)));
+  mockArtworks.forEach(a => { if (!Number.isInteger(a.section) || a.section < 0) delete a.section; });
+  if (keepEmbeddings || mockArtworks.some(a => a.section === undefined)) aiApplySections();
+  else { aiCompactSections(); aiSectionInfo = { method:'저장된 섹션', silhouette:null }; }
   aiDataChanged(message);
   aiRenderArtworkList();
 }
@@ -2611,6 +2625,119 @@ function aiSuggestWeight(art,stats) {
   const area=art.w*art.h/10000;
   return area*0.27+stats.visualWeight >= 0.55 ? '무거움' : '가벼움';
 }
+
+/* =======================================================================
+ * 기획안 3. CLIP 이미지 임베딩 → 코사인 유사도 행렬 → 섹션 군집화
+ * 작품별 512차원 특징 벡터를 뽑아 평균 연결 계층적 군집화로 섹션을 나눕니다.
+ * 섹션 수 k는 실루엣 점수로 자동 선택(2~4개, 뚜렷한 구분이 없으면 1개).
+ * 임베딩은 세이브 파일에 넣지 않고, 불러온 뒤 다시 계산합니다.
+ * zero-shot 주제 라벨은 섹션 이름 표시용으로만 씁니다.
+ * ======================================================================= */
+const AI_MIN_SILHOUETTE = 0.12;   // 이보다 낮으면 억지로 나누지 않고 한 섹션으로 둠
+let aiSectionInfo = { method:'주제 라벨 (임베딩 없음)', silhouette:null };
+async function aiEmbedCanvas(classifier, cv) {
+  // zero-shot 파이프라인이 이미 내려받은 CLIP 모델을 그대로 써서 이미지 임베딩(image_embeds)만 꺼냄
+  const { RawImage } = await import(AI_VISION_PACKAGE);
+  const pixels = await classifier.processor(RawImage.fromCanvas(cv));
+  const text = classifier.tokenizer(['an artwork'], { padding:true, truncation:true });
+  const out = await classifier.model({ ...text, pixel_values:pixels.pixel_values });
+  if (!out.image_embeds) throw new Error('모델이 이미지 임베딩을 반환하지 않았습니다.');
+  const v = Array.from(out.image_embeds.data);
+  console.log(`[AI] CLIP 이미지 임베딩 ${v.length}차원`);   // 정상이면 512
+  const norm = Math.sqrt(v.reduce((s,x)=>s+x*x,0)) || 1;
+  return v.map(x => x / norm);   // 단위 벡터: 내적 = 코사인 유사도
+}
+function aiCosine(a,b) { let s=0; for (let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; }
+function aiSimilarityMatrix(vectors) { return vectors.map(a => vectors.map(b => aiCosine(a,b))); }
+// 평균 연결 계층적 군집: 평균 유사도가 가장 높은 두 군집을 k개가 될 때까지 합침
+function aiAgglomerate(S, k) {
+  const clusters = S.map((_,i) => [i]);
+  const link = (A,B) => { let s=0; for (const i of A) for (const j of B) s+=S[i][j]; return s/(A.length*B.length); };
+  while (clusters.length > k) {
+    let best = null;
+    for (let a=0;a<clusters.length;a++) for (let b=a+1;b<clusters.length;b++) {
+      const s = link(clusters[a],clusters[b]);
+      if (!best || s > best.s) best = { a, b, s };
+    }
+    clusters[best.a] = clusters[best.a].concat(clusters[best.b]);
+    clusters.splice(best.b,1);
+  }
+  return clusters;
+}
+// 실루엣 점수 (거리 = 1 - 코사인 유사도). 혼자인 작품은 0점.
+function aiSilhouette(S, clusters) {
+  let total = 0;
+  for (const C of clusters) for (const i of C) {
+    if (C.length === 1) continue;
+    const a = C.reduce((v,j) => v + (j===i ? 0 : 1-S[i][j]), 0) / (C.length-1);
+    let b = Infinity;
+    for (const D of clusters) if (D !== C) b = Math.min(b, D.reduce((v,j) => v+1-S[i][j], 0) / D.length);
+    total += (b-a) / Math.max(a, b, 1e-9);
+  }
+  return total / S.length;
+}
+function aiClusterSections(vectors) {
+  const n = vectors.length, S = aiSimilarityMatrix(vectors), all = [S.map((_,i)=>i)];
+  let best = { clusters:all, silhouette:0 };
+  for (let k=2; k<=Math.min(4,n-1); k++) {
+    const clusters = aiAgglomerate(S,k), silhouette = aiSilhouette(S,clusters);
+    if (silhouette > best.silhouette) best = { clusters, silhouette };
+  }
+  if (best.silhouette < AI_MIN_SILHOUETTE) best = { clusters:all, silhouette:best.silhouette };
+  const labels = new Array(n);
+  best.clusters.sort((A,B) => Math.min(...A)-Math.min(...B)).forEach((C,s) => C.forEach(i => labels[i]=s));
+  return { labels, silhouette:best.silhouette };
+}
+function aiSectionManual(art) { return (art.aiEditedFields||[]).includes('section') && Number.isInteger(art.section); }
+// 섹션 번호를 0,1,2...로 다시 매김 (크기 순서는 유지)
+function aiCompactSections() {
+  const ids = [...new Set(mockArtworks.map(a => a.section))].sort((a,b)=>a-b);
+  mockArtworks.forEach(a => a.section = ids.indexOf(a.section));
+}
+// 모든 작품에 임베딩이 있으면 CLIP 군집, 아니면 주제 라벨로 임시 섹션. 수동으로 바꾼 섹션은 유지.
+function aiApplySections() {
+  let labels;
+  if (mockArtworks.length && mockArtworks.every(a => a.embedding)) {
+    const r = aiClusterSections(mockArtworks.map(a => a.embedding));
+    labels = r.labels;
+    aiSectionInfo = { method:'CLIP 임베딩 군집', silhouette:r.silhouette };
+    console.log(`[AI] 섹션 군집: ${new Set(labels).size}개, 실루엣 ${r.silhouette.toFixed(3)}`, labels);
+  } else {
+    const themes = [...new Set(mockArtworks.map(a => a.theme))];
+    labels = mockArtworks.map(a => themes.indexOf(a.theme));
+    aiSectionInfo = { method:'주제 라벨 (임베딩 없음)', silhouette:null };
+  }
+  mockArtworks.forEach((a,i) => { if (!aiSectionManual(a)) a.section = labels[i]; });
+  aiCompactSections();
+}
+// 섹션 이름: 구성 작품들의 zero-shot 주제 중 가장 많은 것
+function aiSectionName(s) {
+  const counts = {};
+  mockArtworks.filter(a => a.section === s).forEach(a => counts[a.theme] = (counts[a.theme]||0)+1);
+  const top = Object.entries(counts).sort((x,y) => y[1]-x[1])[0];
+  return `섹션 ${s+1}${top ? ` · ${top[0]}` : ''}`;
+}
+// 저장 파일을 불러온 뒤(또는 되돌린 뒤) 빠진 임베딩만 다시 계산. 저장된 섹션은 그대로 둡니다.
+async function aiRecomputeEmbeddings() {
+  if (!mockArtworks.some(a => !a.embedding && /CLIP/.test(a.aiAnalysis||''))) return;
+  if (aiVisionRunning || aiWorking) { setTimeout(aiRecomputeEmbeddings, 500); return; }
+  aiVisionRunning = true; aiBusy(true);
+  try {
+    $('aiStatus').textContent = '저장된 작품의 CLIP 임베딩을 다시 계산하는 중...';
+    const classifier = await aiGetLocalClassifier();
+    for (const art of mockArtworks) {
+      if (art.embedding) continue;
+      art.embedding = await aiEmbedCanvas(classifier, aiCanvasForImage(await aiLoadImage(art.url), 224));
+    }
+    if (mockArtworks.every(a => a.embedding)) aiSectionInfo = { method:'CLIP 임베딩 (저장된 섹션 유지)', silhouette:null };
+    aiDataChanged('CLIP 임베딩을 다시 계산했어요. 저장된 섹션은 그대로 유지했습니다.');
+  } catch(e) {
+    console.error('임베딩 재계산 실패', e);
+    $('aiStatus').textContent = `임베딩을 다시 계산하지 못했습니다: ${e.message}. 저장된 섹션으로 배치합니다.`;
+  } finally {
+    aiVisionRunning = false; aiBusy(false); aiRenderArtworkList();
+  }
+}
 async function aiGetLocalClassifier() {
   if (!aiClassifierPromise) {
     aiClassifierPromise = (async()=>{
@@ -2649,7 +2776,8 @@ function aiInfoForArtwork(art) {
     if (Number.isFinite(art.aiScoreMargin)) tags.push(`2위와 차이 ${(art.aiScoreMargin*100).toFixed(0)}%p`);
   }
   if (art.aiNeedsReview) tags.push('⚠ 분류 확인 권장');
-  if (art.aiEditedFields && art.aiEditedFields.length) tags.push(`수동 보정 유지 (${art.aiEditedFields.join(', ')})`);
+  const FIELD_KO = { theme:'주제', color:'색온도', weight:'무게', section:'섹션' };
+  if (art.aiEditedFields && art.aiEditedFields.length) tags.push(`수동 보정 유지 (${art.aiEditedFields.map(f => FIELD_KO[f]||f).join(', ')})`);
   if (art.aiSizeExample) tags.push('크기 임시값');
   return tags.join(' · ');
 }
@@ -2660,6 +2788,15 @@ function aiRenderArtworkList() {
     const pic=document.createElement('img');pic.src=art.url;pic.alt=art.title;pic.loading='lazy';card.appendChild(pic);
     const fields=document.createElement('div');fields.className='aiArtFields';
     const title=aiFormField('작품 제목',art.title,'title','text');title.classList.add('aiFull');fields.appendChild(title);
+    // 섹션: CLIP 임베딩 군집 결과. 다른 섹션이나 새 섹션으로 직접 옮길 수 있음
+    const section=document.createElement('label');section.className='aiFull';
+    section.appendChild(document.createTextNode(aiSectionManual(art)?'섹션 (수동 지정)':'섹션 (CLIP 유사도 군집)'));
+    const sectionSel=document.createElement('select');sectionSel.dataset.aiField='section';
+    const ids=[...new Set(mockArtworks.map(a=>a.section))].sort((a,b)=>a-b);
+    for (const s of ids) {const o=document.createElement('option');o.value=String(s);o.textContent=aiSectionName(s);sectionSel.appendChild(o);}
+    const fresh=document.createElement('option');fresh.value=String(ids.length);fresh.textContent=`새 섹션 (섹션 ${ids.length+1})`;sectionSel.appendChild(fresh);
+    sectionSel.value=String(art.section);
+    section.appendChild(sectionSel);fields.appendChild(section);
     fields.appendChild(aiFormField('가로 cm',art.w,'w','number'));
     fields.appendChild(aiFormField('세로 cm',art.h,'h','number'));
     fields.appendChild(aiFormField('주제 (AI 추정)',art.theme,'theme','select',['풍경','인물','추상','정물','도시','미분류']));
@@ -2673,11 +2810,19 @@ function aiRenderArtworkList() {
     const retry=document.createElement('button'); retry.type='button';retry.className='mbtn';
     retry.textContent='이 작품만 재분석';retry.disabled=aiWorking||aiVisionRunning;
     retry.addEventListener('click',()=>aiAnalyzeSingleArtwork(index));actions.appendChild(retry);
+    const remove=document.createElement('button');remove.type='button';remove.className='mbtn';
+    remove.textContent='삭제';remove.disabled=aiWorking||aiVisionRunning||mockArtworks.length<2;
+    remove.addEventListener('click',()=>{
+      if (aiWorking||aiVisionRunning||mockArtworks.length<2) return;
+      aiAssignDataset(mockArtworks.filter((_,k)=>k!==index),`${art.title}을(를) 목록에서 뺐어요. (남은 작품 ${mockArtworks.length-1}개)`,true);
+    });
+    actions.appendChild(remove);
     if (art.aiEditedFields && art.aiEditedFields.length) {
       const reset=document.createElement('button');reset.type='button';reset.className='mbtn';
       reset.textContent='수동 보정 해제';reset.disabled=aiWorking||aiVisionRunning;
       reset.addEventListener('click',()=>{
         art.aiEditedFields=[];
+        aiApplySections();
         aiDataChanged('수동 보정을 해제했어요. AI로 다시 분석하려면 재분석 버튼을 눌러주세요.');
         aiRenderArtworkList();
       });
@@ -2685,14 +2830,22 @@ function aiRenderArtworkList() {
     }
     fields.appendChild(actions);card.appendChild(fields);target.appendChild(card);
   });
-  $('aiImportNote').textContent=`현재 작품 ${mockArtworks.length}개 · ${mockArtworks.some(a=>a.aiSizeExample)?'크기는 이미지 비율 기준 임시값이므로 실제 cm로 수정하세요.':'작품 정보 수정 가능'}`;
+  const sectionCount=new Set(mockArtworks.map(a=>a.section)).size;
+  const sil=Number.isFinite(aiSectionInfo.silhouette)?` · 실루엣 ${aiSectionInfo.silhouette.toFixed(2)}`:'';
+  $('aiImportNote').textContent=`현재 작품 ${mockArtworks.length}개 · 섹션 ${sectionCount}개 (${aiSectionInfo.method}${sil}) · ${mockArtworks.some(a=>a.aiSizeExample)?'크기는 이미지 비율 기준 임시값이므로 실제 cm로 수정하세요.':'작품 정보 수정 가능'}`;
 }
 function aiHandleFieldChange(e) {
   const el=e.target;if (!el.dataset || !el.dataset.aiField) return;
   const node=el.closest('[data-ai-index]'); if (!node) return;
   const art=mockArtworks[Number(node.dataset.aiIndex)],key=el.dataset.aiField;
   if (!art) return;
-  if (key==='w'||key==='h') {
+  if (key==='section') {
+    const s=Number(el.value);if (!Number.isInteger(s)||s<0) {el.value=String(art.section);return;}
+    art.section=s;
+    if (!Array.isArray(art.aiEditedFields)) art.aiEditedFields=[];
+    if (!art.aiEditedFields.includes('section')) art.aiEditedFields.push('section');
+    aiCompactSections();
+  } else if (key==='w'||key==='h') {
     const n=Number(el.value);if (!Number.isFinite(n)||n<10||n>500) {el.value=art[key];return;}
     art[key]=n;
     if (!Array.isArray(art.aiEditedDims)) art.aiEditedDims=[];
@@ -2705,6 +2858,8 @@ function aiHandleFieldChange(e) {
       if (!art.aiEditedFields.includes(key)) art.aiEditedFields.push(key);
       art.aiAnalysis=Number.isFinite(art.aiConfidence)?'CLIP 분석 + 수동 보정':'수동 보정';
     }
+    // 임베딩이 없을 때는 섹션이 주제 라벨에서 나오므로 주제를 바꾸면 섹션도 다시 나눔
+    if (key==='theme' && !mockArtworks.every(a=>a.embedding)) aiApplySections();
   }
   aiDataChanged('작품 정보를 수정했습니다. 배치안을 다시 비교해주세요.');
   aiRenderArtworkList();
@@ -2722,6 +2877,7 @@ async function aiAnalyzeOneArtwork(art,classifier) {
   const suggested=found?found.ko:'미분류';
   const score=Number(best.score)||0, margin=score-(Number(runner?.score)||0);
   art.aiModelTheme=suggested; art.aiConfidence=score; art.aiScoreMargin=margin;
+  art.embedding=await aiEmbedCanvas(classifier,cv);   // 섹션 군집화용 특징 벡터 (저장하지 않음)
   // 실제 신뢰도 확률이 아니라 검토를 위한 보수적 휴리스틱.
   art.aiNeedsReview=score<0.45 || margin<0.12;
   const overrides=new Set(art.aiEditedFields||[]);
@@ -2740,6 +2896,7 @@ async function aiAnalyzeSingleArtwork(index) {
     $('aiStatus').textContent=`${art.title}: 모델 준비·재분석 중...`;
     const classifier=await aiGetLocalClassifier();
     await aiAnalyzeOneArtwork(art,classifier);
+    aiApplySections();
     aiDataChanged(`${art.title}: 재분석 완료. 수동 보정은 유지했어요.`);
   } catch(e) {
     console.error('개별 AI 분석 실패',e);
@@ -2761,7 +2918,8 @@ async function aiAnalyzeUploadedArtworks() {
       await aiAnalyzeOneArtwork(art,classifier);
       aiRenderArtworkList();
     }
-    aiDataChanged('분석 완료! ⚠ 표시가 있으면 분류를 검토하고 배치안을 비교해보세요.');
+    aiApplySections();
+    aiDataChanged(`분석 완료! CLIP 유사도로 섹션 ${new Set(mockArtworks.map(a=>a.section)).size}개로 나눴어요. ⚠ 표시가 있으면 분류를 검토하고 배치안을 비교해보세요.`);
   } catch(e) {
     console.error('CLIP 분석 실패',e);
     status.textContent=`AI 분석을 완료하지 못했습니다: ${e.message}. 인터넷을 확인하거나 직접 분류하세요.`;
@@ -2777,6 +2935,7 @@ function aiExportLayout() {
       note:'imageUrl이 data URL인 경우 개인정보/이미지 용량을 줄이기 위해 제외됨',
       artworks:mockArtworks.map((a,index)=>({id:index,title:a.title,year:a.year,
         wCm:a.w,hCm:a.h,theme:a.theme,color:a.color,weight:a.weight,
+        section:a.section,sectionName:aiSectionName(a.section),
         analysis:a.aiAnalysis||'수동/예시',confidence:a.aiConfidence??null,
         aiSuggestedTheme:a.aiModelTheme||null,reviewSuggested:!!a.aiNeedsReview,
         manuallyAdjustedFields:a.aiEditedFields||[],
@@ -2793,12 +2952,15 @@ function aiExportLayout() {
 $('aiFiles').addEventListener('change',async e=>{
   const input=e.target,files=Array.from(input.files||[]);input.value='';
   if(!files.length) return;
-  if(files.length>7){$('aiStatus').textContent='현재 최적화는 작품 7개까지 지원합니다. 7개 이하로 골라주세요.';return;}
+  // 예시 작품만 있으면 교체, 내가 올린 작품이 있으면 뒤에 추가 (여러 번 나눠 골라도 쌓임)
+  const isDemo=mockArtworks.every(a=>AI_DEMO_ARTWORKS.some(d=>d.url===a.url));
+  const kept=isDemo?[]:mockArtworks.slice();
+  if(kept.length+files.length>7){$('aiStatus').textContent=`현재 최적화는 작품 7개까지 지원합니다. 지금 ${kept.length}개가 있어 ${7-kept.length}개까지 더 추가할 수 있어요.`;return;}
   aiBusy(true);
   try {
     $('aiStatus').textContent=`작품 이미지 ${files.length}개를 불러오는 중...`;
-    const arts=await Promise.all(files.map((f,i)=>aiFileToArtwork(f,i)));
-    aiAssignDataset(arts,`작품 ${arts.length}개 등록 완료. 실제 cm 크기를 확인하고 이미지 AI 분석을 눌러주세요.`);
+    const arts=await Promise.all(files.map((f,i)=>aiFileToArtwork(f,kept.length+i)));
+    aiAssignDataset([...kept,...arts],`작품 ${arts.length}개 ${isDemo?'등록':'추가'} 완료 (총 ${kept.length+arts.length}개). 실제 cm 크기를 확인하고 이미지 AI 분석을 눌러주세요.`,true);
   }catch(e){$('aiStatus').textContent=`이미지를 불러오지 못했습니다: ${e.message}`;}
   finally {aiBusy(false);}
 });
@@ -2809,6 +2971,7 @@ $('aiDemoBtn').addEventListener('click',()=>{
 });
 $('aiArtList').addEventListener('change',aiHandleFieldChange);
 $('aiExportBtn').addEventListener('click',aiExportLayout);
+aiApplySections();
 aiRenderArtworkList();
 
 
@@ -2846,7 +3009,7 @@ function showAICaption(o) {
 const AI_WALL_MARGIN = 0.08;    // 벽 가장자리 8cm
 const AI_DOOR_CLEARANCE = 0.20; // 문·벽 장식과 액자 사이 20cm
 const AI_PROFILE_NAMES = [
-  '주제별 묶음', '색온도별 통일', '시각적 무게 균형', '형태 혼합·관람 흐름'
+  '유사도 섹션별 묶음', '색온도별 통일', '시각적 무게 균형', '형태 혼합·관람 흐름'
 ];
 
 // fitFrame()과 같은 테두리 규격 (그림 + 매트 + 나무 프레임)
@@ -2920,11 +3083,11 @@ function aiFreeWallSegments(wi, ordered, ys) {
 }
 
 function aiOrders(arts, profile) {
-  const key = profile === 0 ? 'theme' : profile === 1 ? 'color' : null;
+  const key = profile === 0 ? 'section' : profile === 1 ? 'color' : null;
   const initial = arts.slice();
   const byWidth = arts.slice().sort((a, b) => aiOuterSize(b).w - aiOuterSize(a).w);
   const byTag = arts.slice().sort((a, b) =>
-    String(a[key] || aiKind(a)).localeCompare(String(b[key] || aiKind(b)), 'ko') || b.w - a.w);
+    String(key ? a[key] : aiKind(a)).localeCompare(String(key ? b[key] : aiKind(b)), 'ko') || b.w - a.w);
   const byMass = arts.slice().sort((a, b) => aiMass(b) - aiMass(a));
   // 무거운 작품은 양쪽으로 분산해 벽면의 시각적 모멘트를 줄이는 후보도 만듭니다.
   const spread = [];
@@ -3008,11 +3171,12 @@ function aiEvaluateWall(wi, mask, optionType, gap, cache) {
     if (!candidate) continue;
     // 같은 종류 작품들이 실제로 붙어 있을 때 점수를 조금 더 부여합니다.
     const placements = candidate.placements.slice().sort((a,b) => a.x - b.x);
-    const type = optionType === 0 ? 'theme' : optionType === 1 ? 'color' : null;
     let adjacent = 0;
     for (let i = 1; i < placements.length; i++) {
       if (optionType === 3) adjacent += aiKind(placements[i - 1].art) !== aiKind(placements[i].art) ? 2 : -1;
-      if (type) adjacent += placements[i-1].art[type] === placements[i].art[type] ? 1.5 : -0.7;
+      if (optionType === 1) adjacent += placements[i-1].art.color === placements[i].art.color ? 1.5 : -0.7;
+      // 안 1: 이웃한 두 작품의 유사도 기반 연속 점수 (같은 섹션·비슷한 작품일수록 +)
+      if (optionType === 0) adjacent += aiScoreCtx.pair[mockArtworks.indexOf(placements[i-1].art)][mockArtworks.indexOf(placements[i].art)] * 1.5;
     }
     const score = candidate.quality + adjacent;
     if (!best || score > best.quality) best = { placements: candidate.placements, quality: score };
@@ -3021,14 +3185,68 @@ function aiEvaluateWall(wi, mask, optionType, gap, cache) {
   return best;
 }
 
+// 작품 쌍을 '얼마나 가까이 둘지' 가중치 (-1: 멀리 ~ +1: 가까이).
+// 같은 섹션 여부(±0.6) + 코사인 유사도의 상대값(z점수, ±0.4)을 합친 연속값. 임베딩이 없으면 섹션만 사용.
+function aiPairWeights() {
+  const n = mockArtworks.length, W = mockArtworks.map(() => new Array(n).fill(0));
+  let S = null, mean = 0, sd = 1;
+  if (n > 1 && mockArtworks.every(a => a.embedding)) {
+    S = aiSimilarityMatrix(mockArtworks.map(a => a.embedding));
+    const vals = [];
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) vals.push(S[i][j]);
+    mean = vals.reduce((v, x) => v + x, 0) / vals.length;
+    sd = Math.sqrt(vals.reduce((v, x) => v + (x - mean) ** 2, 0) / vals.length) || 1;
+  }
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    if (i === j) continue;
+    const z = S ? clamp((S[i][j] - mean) / sd, -2, 2) / 2 : 0;
+    W[i][j] = (mockArtworks[i].section === mockArtworks[j].section ? 0.6 : -0.6) + 0.4 * z;
+  }
+  return W;
+}
+// 최적화 한 번 동안 쓰는 값: 쌍 가중치, 벽 로컬 좌표(u) → 방 좌표 변환, 방 대각선, 간격
+let aiScoreCtx = null;
+function aiMakeScoreCtx(gap) {
+  const wallXf = walls.map(w => ({ px:w.group.position.x, pz:w.group.position.z,
+    c:Math.cos(w.group.rotation.y), s:Math.sin(w.group.rotation.y) }));
+  return { pair:aiPairWeights(), wallXf, diag:Math.max(0.01, Math.hypot(roomW, roomD)), gap };
+}
+
 function aiScoreLayout(optionType, placements, layouts, assignment) {
   const used = layouts.filter(l => l.placements.length);
   let score = used.length * (optionType === 3 ? 5 : 1.2);
   for (const l of used) score += l.quality;
-  if (optionType === 0 || optionType === 1) {
-    const key = optionType === 0 ? 'theme' : 'color';
+  if (optionType === 0) {
+    // Kim et al.(2024, ACM JOCCH) 기준: 같은 섹션은 가깝게, 다른 섹션은 멀게, 벽 공간은 고르게.
+    // 라벨 일치 여부 대신 작품 쌍의 유사도 가중치 × 실제 3D 거리로 연속 점수를 매김.
+    const { pair, wallXf, diag, gap } = aiScoreCtx;
+    const pos = [];
+    for (const p of placements) {
+      const t = wallXf[p.wallIndex];
+      pos[mockArtworks.indexOf(p.art)] = [t.px + t.c * p.x, p.y, t.pz - t.s * p.x];
+    }
     for (let i = 0; i < mockArtworks.length; i++) for (let j = i + 1; j < mockArtworks.length; j++) {
-      const sameTag = mockArtworks[i][key] === mockArtworks[j][key];
+      const dist = Math.hypot(pos[i][0]-pos[j][0], pos[i][1]-pos[j][1], pos[i][2]-pos[j][2]);
+      const proximity = Math.max(0, 1 - dist / diag);              // 0(방 대각선만큼 멂) ~ 1(붙어 있음)
+      const sameWall = assignment[i] === assignment[j] ? 1 : 0, w = pair[i][j];
+      // 묶기(+)를 떼어놓기(-)보다 강하게: 다른 섹션은 같은 벽만 피하면 충분하고, 멀리 보내려고 섹션을 쪼개지 않도록
+      score += w > 0 ? w * (14 * proximity + 6 * sameWall) : w * (6 * proximity + 8 * sameWall);
+    }
+    // 한 섹션이 여러 벽으로 흩어지면 감점
+    const sectionWalls = new Map();
+    mockArtworks.forEach((a, ix) => {
+      if (!sectionWalls.has(a.section)) sectionWalls.set(a.section, new Set());
+      sectionWalls.get(a.section).add(assignment[ix]);
+    });
+    for (const ws of sectionWalls.values()) score -= (ws.size - 1) * 12;
+    const fills = layouts.map((l, wi) => l.placements.length
+      ? (l.placements.reduce((v, p) => v + p.outerW, 0) + gap * (l.placements.length - 1)) / dims[wi].w : null)
+      .filter(f => f !== null);
+    const meanFill = fills.reduce((v, f) => v + f, 0) / fills.length;
+    score -= Math.sqrt(fills.reduce((v, f) => v + (f - meanFill) ** 2, 0) / fills.length) * 12;   // 벽마다 채운 비율이 고를수록 좋음
+  } else if (optionType === 1) {
+    for (let i = 0; i < mockArtworks.length; i++) for (let j = i + 1; j < mockArtworks.length; j++) {
+      const sameTag = mockArtworks[i].color === mockArtworks[j].color;
       const sameWall = assignment[i] === assignment[j];
       score += sameTag ? (sameWall ? 15 : -4) : (sameWall ? -6 : 0);
     }
@@ -3133,6 +3351,7 @@ function aiOptimizePlans(gap) {
   if (count < 1 || count > 7) throw new Error('현재 최적화는 1~7개 작품을 지원합니다.');
   const profiles = Array.from({ length:4 }, () => []);
   const cache = new Map(), nCases = Math.pow(4, count);
+  aiScoreCtx = aiMakeScoreCtx(gap);
   for (let optionType = 0; optionType < 4; optionType++) {
     const top = profiles[optionType];
     for (let caseNo=0; caseNo<nCases; caseNo++) {
